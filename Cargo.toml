@@ -1,0 +1,15 @@
+[package]
+name = "ratslang"
+version = "0.1.0"
+keywords = ["config", "lang", "parser"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/stelzo/ratslang/"
+edition = "2024"
+include = ["**/*.rs", "**/*.md", "**/Cargo.toml"]
+
+[dependencies]
+log = "0.4.25"
+logos = "0.15.0"
+chumsky = "0.10.0"
+ariadne = "0.4"
+anyhow = "1"
