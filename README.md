@@ -21,7 +21,7 @@ variable = true
 time = 1s
 time_is_running = 1ms..2mins # ranges convert automatically
 
-length = 1cm..1m
+len = 1cm..1m
 
 # _ signals a variable the interpreter is looking for.
 _internal = time_is_running
@@ -57,9 +57,9 @@ Currently, Ratslang doesn't support expressions like arithmetic, loops, or condi
 * **Boolean**: `true`, `false`
 * **Integer**: Example: `42`, `-100`
 * **Floating-point**: Example: `69.42`, `.1`, `6.`, `-3.14`
-* **String**: `"Hello"`, `Hello` — Quotes can be omitted if the string doesn't conflict with a previously defined variable. Example: `"my string"`, `another_string_without_quotes`
+* **String**: Quotes can be omitted if the string doesn't conflict with a previously defined variable. Example: `"my string"`, `another_string_without_quotes`
 * **Path**: Example: `./somewhere/relative.dat`, `/or/absolute`, `./../backneed/dotfirst.launch.py`
-* **Array/Matrix**: `[ <Type>, <Type>, ... ]`, `[ 42, World, [ "nested" ] ]`, `[ [ 1, 2, 3 ], [ 4, 5, 6 ] ]` — Newlines after commas are also supported for readability. Example: `[1, 2, 3]`, `["apple", "banana"]`
+* **Array/Matrix**: Newlines after commas are also supported for readability. `[ <Type>, <Type>, ... ]`, `[ 42, World, [ "nested" ] ]`, `[ [ 1, 2, 3 ], [ 4, 5, 6 ] ]`
 * **Time**:
     * **Hour**: `hour`, `hours` (`s` is optional). Example: `2hours`, `1.5hour`
     * **Minute**: `min`, `mins` (`s` is optional). Example: `30min`, `5mins`
@@ -77,7 +77,7 @@ Currently, Ratslang doesn't support expressions like arithmetic, loops, or condi
 
 ## Includes
 
-In Ratslang, assigning a path to a namespace is not just intuitive; **it's how you perform an include operation**. This means the contents of the included file will be loaded into that specific namespace.
+In Ratslang, assigning another `.rl` file to a namespace is not just intuitive; **it's how you perform an include operation**. This means the contents of the included file will be loaded into that specific namespace.
 
 ~~~awk
 = ./path_relative_to_current_file.rl
