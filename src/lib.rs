@@ -308,7 +308,7 @@ pub struct UnitVal {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Rhs {
-    Range { from: Option<Val>, to: Option<Val> },
+    Range { from: Val, to: Val },
     Var(Var),
     Path(String),
     // Expr() TODO evaluate so in the end it becomes atomic Rhs
@@ -400,14 +400,6 @@ impl Evaluated {
 #[derive(Debug, Clone)]
 pub struct Root {
     pub vardefs: Vec<Statement>,
-}
-
-#[derive(Debug, PartialEq, Clone, Copy)]
-pub enum AbsTimeRange {
-    Open,
-    UpperOpen(u64),
-    LowerOpen(u64),
-    Closed((u64, u64)),
 }
 
 #[derive(Debug, Clone)]
@@ -672,36 +664,31 @@ where
     .labelled("way");
 
     let timerange = time
-        .or_not()
         .then_ignore(just(Token::OpRange))
         .then(time)
         .try_map(|(from, to), span| {
             Ok(Rhs::Range {
                 from: {
-                    if let Some(from) = from {
-                        Some(Val::UnitedVal(UnitVal {
-                            val: {
-                                match from {
-                                    NumVal::Floating(_) => unreachable!("integerised before"),
-                                    NumVal::Integer(i) => {
-                                        if i < 0 {
-                                            return Err(Rich::custom(
-                                                span,
-                                                "Negative Integer Number for Timespan.",
-                                            ));
-                                        } else {
-                                            i as u64
-                                        }
+                    Val::UnitedVal(UnitVal {
+                        val: {
+                            match from {
+                                NumVal::Floating(_) => unreachable!("integerised before"),
+                                NumVal::Integer(i) => {
+                                    if i < 0 {
+                                        return Err(Rich::custom(
+                                            span,
+                                            "Negative Integer Number for Timespan.",
+                                        ));
+                                    } else {
+                                        i as u64
                                     }
                                 }
-                            },
-                            unit: Unit::TimeMilliseconds,
-                        }))
-                    } else {
-                        None
-                    }
+                            }
+                        },
+                        unit: Unit::TimeMilliseconds,
+                    })
                 },
-                to: Some(Val::UnitedVal(UnitVal {
+                to: Val::UnitedVal(UnitVal {
                     val: match to {
                         NumVal::Floating(_) => unreachable!("integerised before"),
                         NumVal::Integer(i) => {
@@ -716,7 +703,7 @@ where
                         }
                     },
                     unit: Unit::TimeMilliseconds,
-                })),
+                }),
             })
         })
         .labelled("time range");
@@ -726,7 +713,7 @@ where
         .then(way)
         .try_map(|(from, to), span| {
             Ok(Rhs::Range {
-                from: Some(Val::UnitedVal(UnitVal {
+                from: Val::UnitedVal(UnitVal {
                     val: match from {
                         NumVal::Floating(_) => unreachable!("integerised before"),
                         NumVal::Integer(i) => {
@@ -741,8 +728,8 @@ where
                         }
                     },
                     unit: Unit::WayMillimeter,
-                })),
-                to: Some(Val::UnitedVal(UnitVal {
+                }),
+                to: Val::UnitedVal(UnitVal {
                     val: match to {
                         NumVal::Floating(_) => unreachable!("integerised before"),
                         NumVal::Integer(i) => {
@@ -757,7 +744,7 @@ where
                         }
                     },
                     unit: Unit::WayMillimeter,
-                })),
+                }),
             })
         })
         .labelled("way range");
@@ -804,8 +791,8 @@ where
             };
 
             Rhs::Range {
-                from: Some(Val::NumVal(from)),
-                to: Some(Val::NumVal(to)),
+                from: Val::NumVal(from),
+                to: Val::NumVal(to),
             }
         })
         .labelled("number range");
