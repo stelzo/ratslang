@@ -35,11 +35,14 @@ my.super.long.prefix.var = 0..100 # ranges on namespaced variable "var"
 my.super.{
   
   long.prefix.{
-    next_var = 3.
+    next_var = "UTF-🎱 Strings"
   }
 
   something_else = -99.018
 }
+
+mat = [ [ 6, 1, 9 ],
+        [ 3, 1, 8 ] ]
 ~~~
 
 Currently, Ratslang doesn't support expressions like arithmetic, loops, or conditional statements. This is a deliberate choice, and it's still undecided if it will ever include such features. Some keywords are already reserved for potential future use.
