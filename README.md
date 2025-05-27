@@ -80,7 +80,7 @@ Currently, Ratslang doesn't support expressions like arithmetic, loops, or condi
 
 ## Includes
 
-In Ratslang, assigning another `.rl` file to a namespace is not just intuitive; **it's how you perform an include operation**. This means the contents of the included file will be loaded into that specific namespace.
+In Ratslang, including is done by assigning a path to the current namespace. All variables will then get the respective prefix.
 
 ~~~awk
 = ./path_relative_to_current_file.rl
