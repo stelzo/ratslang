@@ -2,9 +2,12 @@
 
 *More a slang, less a lang.*
 
-Ratslang is a compact **configuration language**, delivered as a Rust-based parser library.
+> [!WARNING]
+> The language is currently in active development and is not ready for production use. Updates *will* break your code or `.rl` files. Use at your own risk.
 
-It was born out of frustration with the lack of proper types for **time** and **length** in configuration files. When we configure physical systems, even a single zero more or less can have massive consequences. Sometimes, we don't even realize there's a problem until it's too late. The famous [Loss of the Mars Climate Orbiter](https://spacemath.gsfc.nasa.gov/weekly/6Page53.pdf) is a prime example of this issue.
+Ratslang is a compact **configuration language**, delivered as a Rust library.
+
+It was born out of frustration with the lack of proper types for **time** and **length** in configuration files. When we configure physical systems like robots, even a single zero more or less can have massive consequences. Sometimes, we don't even realize there's a problem until it's too late. The famous [Loss of the Mars Climate Orbiter](https://spacemath.gsfc.nasa.gov/weekly/6Page53.pdf) is a prime example of this issue.
 
 The core motivations behind Ratslang are:
 
@@ -130,7 +133,16 @@ let namespace = vars
 * Awk syntax highlighting provides a decent visual experience for Ratslang code.
 * Compile errors are beautifully rendered thanks to [Ariadne](https://crates.io/crates/ariadne) ❤️.
 
-A `crates.io` release with comprehensive documentation will be available soon, once a few more details are finalized.
+---
+
+## Future Plans
+
+The following features and improvements are planned:
+
+* **Expanded Units and Scales**: Integrate more diverse units and scales with centralized conversion, ranging from astronomy to quantum physics, powered by the `uom` crate.
+* **Opt-in Language Versioning**: Implement an opt-in versioning system for `.rl` files.
+* **Stable AST Type Names**: Stable types for the AST and for the compiler.
+* **crates.io Release**: A `crates.io` release will follow once all the above points are completed and the design has been proven itself in my own projects.
 
 ---
 
