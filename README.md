@@ -97,7 +97,6 @@ strangefile.{
 First, you compile a Ratslang file to get a cleaned **Abstract Syntax Tree (AST)** with all variables resolved.
 
 ~~~rust
-let ast = ratslang::compile_code("variable = true").unwrap();
 let ast = ratslang::compile_file("./your_file.rl").unwrap();
 ~~~
 
@@ -107,7 +106,7 @@ Then, you can safely read the variables you need using Rust's powerful pattern m
 // "Just get the variable"
 let avar = ast.vars.resolve("password").unwrap();
 let avar = ast.vars.resolve("_my_namespace._some_var").unwrap();
-assert_eq!(avar, Some(Rhs::Val(Val::StringVal(":)".to_owned()))));
+assert_eq!(avar, Some(ratslang::Rhs::Val(ratslang::Val::StringVal(":)".to_owned()))));
 
 // Or truncate and filter namespaces first
 let vars = ast.vars.filter_ns(&["_my_namespace"]);
@@ -117,7 +116,7 @@ let namespace = vars
       .resolve("_some_var")?
       .map_or(Ok("a_default_value".to_owned()), |rhs| {
           Ok(match rhs {
-              rlc::Rhs::String(sval) => sval,
+              ratslang::Rhs::String(sval) => sval,
               _ => {
                   return Err(anyhow!("Unexpected type for _my_namespace._some_var, expected String."));
               }
