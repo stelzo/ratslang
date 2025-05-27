@@ -7,7 +7,7 @@
 
 Ratslang is a compact **configuration language**, delivered as a Rust library.
 
-It was born out of frustration with the lack of proper types for **time** and **length** in configuration files. When we configure physical systems like robots, even a single zero more or less can have massive consequences. Sometimes, we don't even realize there's a problem until it's too late. The famous [Loss of the Mars Climate Orbiter](https://spacemath.gsfc.nasa.gov/weekly/6Page53.pdf) is a prime example of this issue.
+It was born out of frustration with the lack of proper types for **time** and **length** in configuration files. When we configure physical systems like robots, even a single zero more or less can have massive consequences. Sometimes, we don't even realize there's a problem until it's too late. The famous [Loss of the Mars Climate Orbiter](https://en.wikipedia.org/wiki/Mars_Climate_Orbiter) is a prime example of this issue.
 
 The core motivations behind Ratslang are:
 
@@ -93,6 +93,12 @@ strangefile.{
 ---
 
 ## Library Usage
+
+Add this to your `Cargo.toml`.
+
+~~~toml
+ratslang = { version = "0.1.0-beta1", git = "https://github.com/stelzo/ratslang", branch = "main" }
+~~~
 
 First, you compile a Ratslang file to get a cleaned **Abstract Syntax Tree (AST)** with all variables resolved.
 
