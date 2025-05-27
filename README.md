@@ -49,7 +49,7 @@ Currently, Ratslang doesn't support expressions like arithmetic, loops, or condi
 ## Variables
 
 * **Dynamic types**
-* **Overwritable** (as you'd expect)
+* **Mutable**
 * **Copy-on-assignment**
 * **C-style naming**
 
