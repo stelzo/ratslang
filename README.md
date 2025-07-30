@@ -32,13 +32,13 @@ _internal = time_is_running
 my.super.long.prefix.var = 0..100 # ranges on namespaced variable "var"
 
 # nested
-my.super.{
-  
-  long.prefix.{
-    next_var = "UTF-🎱 Strings"
-  }
+my.super {
 
-  something_else = -99.018
+    long.prefix {
+        next_var = "UTF-🎱 Strings"
+    }
+
+    something_else = -99.018
 }
 
 mat = [ [ 6, 1, 9 ],
@@ -100,13 +100,14 @@ strangefile.{
 Add this to your `Cargo.toml`.
 
 ~~~toml
-ratslang = { version = "0.1.0-alpha.1", git = "https://github.com/stelzo/ratslang", branch = "main" }
+ratslang = { version = "0.1.0-alpha.2", git = "https://github.com/stelzo/ratslang", branch = "main" }
 ~~~
 
 First, you compile a Ratslang file to get a cleaned **Abstract Syntax Tree (AST)** with all variables resolved.
 
 ~~~rust
-let ast = ratslang::compile_file("./your_file.rl").unwrap();
+let file = std::path::Path::new("./your_file.rl");
+let ast = ratslang::compile_file(&file.to_path_buf(), None, None).unwrap();
 ~~~
 
 Then, you can safely read the variables you need using Rust's powerful pattern matching.

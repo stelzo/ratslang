@@ -1,4 +1,4 @@
-use core::fmt;
+use core::{fmt, panic};
 use std::{collections::HashMap, path::PathBuf, str::FromStr};
 
 use anyhow::anyhow;
@@ -6,7 +6,6 @@ use ariadne::{Color, Label, Report, ReportKind, Source};
 use logos::{Lexer, Logos};
 
 use chumsky::{
-    container::Seq,
     input::{Stream, ValueInput},
     prelude::*,
 };
@@ -55,7 +54,7 @@ fn integer_second<'a>(lex: &mut Lexer<'a, Token<'a>>) -> Option<i64> {
 
 fn integer_minute<'a>(lex: &mut Lexer<'a, Token<'a>>) -> Option<i64> {
     let slice = lex.slice();
-    let len = if slice.ends_with('s') { 4 } else { 3 };
+    let len = if slice.ends_with("mins") { 4 } else { 3 };
     let f: i64 = slice[..slice.len() - len].parse().ok()?;
     Some(f * 60 * 1000)
 }
@@ -68,7 +67,7 @@ fn integer_millisec<'a>(lex: &mut Lexer<'a, Token<'a>>) -> Option<i64> {
 
 fn integer_hour<'a>(lex: &mut Lexer<'a, Token<'a>>) -> Option<i64> {
     let slice = lex.slice();
-    let len = if slice.ends_with('s') { 5 } else { 4 };
+    let len = if slice.ends_with("hours") { 5 } else { 4 };
     let f: i64 = slice[..slice.len() - len].parse().ok()?;
     Some(f * 60 * 60 * 1000)
 }
@@ -81,7 +80,7 @@ fn floating_second<'a>(lex: &mut Lexer<'a, Token<'a>>) -> Option<f64> {
 
 fn floating_minute<'a>(lex: &mut Lexer<'a, Token<'a>>) -> Option<f64> {
     let slice = lex.slice();
-    let len = if slice.ends_with('s') { 4 } else { 3 };
+    let len = if slice.ends_with("mins") { 4 } else { 3 };
     let f: f64 = slice[..slice.len() - len].parse().ok()?;
     Some(f * 60.0 * 1000.0)
 }
@@ -94,19 +93,9 @@ fn floating_millisec<'a>(lex: &mut Lexer<'a, Token<'a>>) -> Option<f64> {
 
 fn floating_hour<'a>(lex: &mut Lexer<'a, Token<'a>>) -> Option<f64> {
     let slice = lex.slice();
-    let len = if slice.ends_with('s') { 5 } else { 4 };
+    let len = if slice.ends_with("hours") { 5 } else { 4 };
     let f: f64 = slice[..slice.len() - len].parse().ok()?;
     Some(f * 60.0 * 60.0 * 1000.0)
-}
-
-fn rm_first<'a>(lex: &mut Lexer<'a, Token<'a>>) -> &'a str {
-    let slice = lex.slice();
-    &slice[1..slice.len()]
-}
-
-fn rm_last<'a>(lex: &mut Lexer<'a, Token<'a>>) -> &'a str {
-    let slice = lex.slice();
-    &slice[0..slice.len() - 1]
 }
 
 fn rm_first_and_last<'a>(lex: &mut Lexer<'a, Token<'a>>) -> &'a str {
@@ -115,7 +104,7 @@ fn rm_first_and_last<'a>(lex: &mut Lexer<'a, Token<'a>>) -> &'a str {
 }
 
 #[derive(Logos, Debug, PartialEq, Clone)]
-#[logos(skip r"[ \t\f]+")]
+#[logos(skip r"[ \t\f\r]+")]
 enum Token<'a> {
     Error,
 
@@ -126,15 +115,10 @@ enum Token<'a> {
     #[token("-")]
     OpMinus,
 
-    // #[token("<")]
-    // OpInclude,
-    #[regex(".", priority = 1)]
-    Dot,
-
     #[token(",")]
     Comma,
 
-    #[regex(r"(#.*)?\n")]
+    #[regex(r"(#.*)?\n+")]
     NewLine,
 
     #[token("(")]
@@ -150,22 +134,25 @@ enum Token<'a> {
     BlockEnd,
 
     #[token("[")]
-    LParen,
+    LBracket,
 
     #[token("]")]
-    RParen,
+    RBracket,
 
     // -- Operators --
     #[regex("=")]
     OpAssignToLeft,
 
-    #[token("..")]
+    #[token("..", priority = 2)]
     OpRange,
+
+    #[token(".", priority = 3)]
+    Dot,
 
     #[regex(r"\.?\/+[^ \n]*")]
     Path(&'a str),
 
-    #[regex(r#""[^"]+""#, rm_first_and_last)]
+    #[regex(r#""[^"]*""#, rm_first_and_last)]
     String(&'a str),
 
     // -- Keywords --
@@ -173,7 +160,7 @@ enum Token<'a> {
     KwIf,
 
     #[token("~")]
-    DoNotCareOptim, // TODO can not resolve paths anymore with home, right?
+    DoNotCareOptim,
 
     // -- Expressions --
     #[token("true")]
@@ -182,53 +169,45 @@ enum Token<'a> {
     #[token("false")]
     False,
 
+    #[regex(r"[+-]?\d+\.\d*mm", floating_millimeter)]
+    #[regex(r"[+-]?\d+\.\d*m", floating_meter)]
+    #[regex(r"[+-]?\d+\.\d*cm", floating_centimeter)]
+    FloatingNumberMillimeter(f64),
+
+    #[regex(r"[+-]?\d+\.\d*s", floating_second)]
+    #[regex(r"[+-]?\d+\.\d*ms", floating_millisec)]
+    #[regex(r"[+-]?\d+\.\d*mins?", floating_minute)]
+    #[regex(r"[+-]?\d+\.\d*hours?", floating_hour)]
+    FloatingNumberMillisecond(f64),
+
+    #[regex(r"[+-]?\d+cm", integer_centimeter)]
+    #[regex(r"[+-]?\d+mm", integer_millimeter)]
+    #[regex(r"[+-]?\d+m", integer_meter)]
+    IntegerNumberMillimeter(i64),
+
+    #[regex(r"[+-]?\d+s", integer_second)]
+    #[regex(r"[+-]?\d+ms", integer_millisec)]
+    #[regex(r"[+-]?\d+mins?", integer_minute)]
+    #[regex(r"[+-]?\d+hours?", integer_hour)]
+    IntegerNumberMillisecond(i64),
+
+    #[regex(r"[+-]?\d+\.\d+", |lex| lex.slice().parse().ok())]
+    FloatingNumber(f64),
+
     #[regex(r"[+-]?\d+", |lex| lex.slice().parse().ok())]
     IntegerNumber(i64),
 
-    #[regex(r"[+-]?(\d+)?\.\d*", |lex| lex.slice().parse().ok())]
-    FloatingNumber(f64),
-
-    #[regex(r"[+-]?(\d+)?\.\d*mm", floating_millimeter)]
-    #[regex(r"[+-]?(\d+)?\.\d*m]", floating_meter)]
-    #[regex(r"[+-]?(\d+)?\.\d*cm", floating_centimeter)]
-    FloatingNumberMillimeter(f64),
-
-    #[regex(r"[+-]?(\d+)?\.\d*s]", floating_second)]
-    #[regex(r"[+-]?(\d+)?\.\d*ms]", floating_millisec)]
-    #[regex(r"[+-]?(\d+)?\.\d*mins?]", floating_minute)]
-    #[regex(r"[+-]?(\d+)?\.\d*hours?]", floating_hour)]
-    FloatingNumberMillisecond(f64),
-
-    #[regex(r"[+-]?(\d+cm)", integer_centimeter)]
-    #[regex(r"[+-]?(\d+mm)", integer_millimeter)]
-    #[regex(r"[+-]?(\d+m)", integer_meter)]
-    IntegerNumberMillimeter(i64),
-
-    #[regex(r"[+-]?(\d+s)", integer_second)]
-    #[regex(r"[+-]?(\d+ms)", integer_millisec)]
-    #[regex(r"[+-]?(\d+mins)", integer_minute)]
-    #[regex(r"[+-]?(\d+hours)", integer_hour)]
-    IntegerNumberMillisecond(i64),
-
-    #[regex(r"[a-zA-Z_:]+\d*[a-zA-Z_:\d]*\.", rm_last)]
-    VarNamespace(&'a str),
-
-    #[regex(r"[a-zA-Z_:]+\d*[a-zA-Z_:\d]*")]
-    Variable(&'a str),
-
-    #[regex(r"_[a-zA-Z_:]+\d*[a-zA-Z_:\d]*", rm_first)]
-    PredefVariable(&'a str),
+    #[regex(r"[a-zA-Z_:]+[a-zA-Z_:\d]*", |lex| lex.slice())]
+    Identifier(&'a str),
 }
 
 impl fmt::Display for Token<'_> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::VarNamespace(ns) => write!(f, "Namespace({:?})", ns),
             Self::Path(path) => write!(f, "Path({:?})", path),
             Self::String(string) => write!(f, "String({:?})", string),
             Self::Comma => write!(f, ","),
             Self::OpPlus => write!(f, "+"),
-            Self::Dot => write!(f, "."),
             Self::OpMinus => write!(f, "-"),
             Self::Error => write!(f, "<error>"),
             Self::NewLine => write!(f, "\\n"),
@@ -236,8 +215,8 @@ impl fmt::Display for Token<'_> {
             Self::BracketClose => write!(f, "]"),
             Self::BlockStart => write!(f, "{}", "{"),
             Self::BlockEnd => write!(f, "{}", "}"),
-            Self::LParen => write!(f, "("),
-            Self::RParen => write!(f, ")"),
+            Self::LBracket => write!(f, "("),
+            Self::RBracket => write!(f, ")"),
             Self::OpAssignToLeft => write!(f, "<-"),
             Self::OpRange => write!(f, ".."),
             Self::KwIf => write!(f, "if"),
@@ -250,8 +229,8 @@ impl fmt::Display for Token<'_> {
             Self::FloatingNumberMillisecond(s) => write!(f, "{}ms", s),
             Self::IntegerNumberMillimeter(s) => write!(f, "{}mm", s),
             Self::IntegerNumberMillisecond(s) => write!(f, "{}ms", s),
-            Self::Variable(s) => write!(f, "{}", s),
-            Self::PredefVariable(s) => write!(f, "_{}", s),
+            Self::Identifier(s) => write!(f, "{}", s),
+            Self::Dot => write!(f, "."),
         }
     }
 }
@@ -284,6 +263,13 @@ impl NumVal {
             self
         }
     }
+
+    pub fn as_int(&self) -> i64 {
+        match self.integerize_unit_val() {
+            NumVal::Integer(i) => i,
+            _ => panic!("integerize did not integerize"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -302,16 +288,16 @@ pub enum Val {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct UnitVal {
-    pub val: u64,
+    pub val: i64,
     pub unit: Unit,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Rhs {
     Range { from: Val, to: Val },
+    EmptyRange,
     Var(Var),
     Path(String),
-    // Expr() TODO evaluate so in the end it becomes atomic Rhs
     Val(Val),
     Array(Vec<Box<Self>>),
 }
@@ -409,15 +395,15 @@ pub enum StatementKind {
 }
 
 #[derive(Debug, Clone)]
-pub enum StatementKindPass1<'a> {
+pub enum StatementKindPass1 {
     VariableDef(Statement),
     Include {
         namespace: Vec<String>,
         path: String,
     },
     VariableNamespaceBlock {
-        ns: Vec<&'a str>,
-        stmts: Vec<Box<StatementKindPass1<'a>>>,
+        ns: Vec<String>,
+        stmts: Vec<Box<StatementKindPass1>>,
     },
 }
 
@@ -553,8 +539,8 @@ fn parse_to_ast(path: &std::path::Path) -> anyhow::Result<Vec<StatementKindOwned
     return Err(anyhow!("Could not parse ratslang code."));
 }
 
-impl<'a> From<StatementKindPass1<'a>> for StatementKindOwnedPass1 {
-    fn from(value: StatementKindPass1<'a>) -> Self {
+impl<'a> From<StatementKindPass1> for StatementKindOwnedPass1 {
+    fn from(value: StatementKindPass1) -> Self {
         match value {
             StatementKindPass1::VariableNamespaceBlock { ns, stmts } => {
                 StatementKindOwnedPass1::VariableNamespaceBlock {
@@ -593,7 +579,7 @@ pub enum StatementPass1 {
 
 #[derive(Debug, Clone)]
 pub enum Statement {
-    AssignLeft { lhs: Vec<Var>, rhs: Rhs },
+    AssignLeft { lhs: Vec<Var>, rhs: Vec<Rhs> },
 }
 
 impl Statement {
@@ -624,327 +610,199 @@ fn ast_add_namespace(ns: &Vec<String>, ast: Vec<StatementKindOwned>) -> Vec<Stat
 
 #[derive(Clone, Copy, Debug)]
 pub enum Operator {
-    Left, // "<-"
+    Left, // "="
 }
 
-// TODO replace with rhs
-// #[derive(Clone, Copy, Debug)]
-// pub enum Expr<'a> {
-//     Var(&'a str),
-//     Predef(&'a str),
-//     Path(&'a str),
-//     Log, // represents the LOG keyword.
-// }
-
-// This function signature looks complicated, but don't fear! We're just saying that this function is generic over
-// inputs that:
-//     - Can have tokens pulled out of them by-value, by cloning (`ValueInput`)
-//     - Gives us access to slices of the original input (`SliceInput`)
-//     - Produces tokens of type `Token`, the type we defined above (`Token = Token<'a>`)
-//     - Produces spans of type `SimpleSpan`, a built-in span type provided by chumsky (`Span = SimpleSpan`)
-// The function then returns a parser that:
-//     - Has an input type of type `I`, the one we declared as a type parameter
-//     - Produces an `SExpr` as its output
-//     - Uses `Rich`, a built-in error type provided by chumsky, for error generation
-fn parser<'a, I>()
--> impl Parser<'a, I, Vec<StatementKindPass1<'a>>, extra::Err<Rich<'a, Token<'a>>>>
+fn parser<'a, I>() -> impl Parser<'a, I, Vec<StatementKindPass1>, extra::Err<Rich<'a, Token<'a>>>>
 where
     I: ValueInput<'a, Token = Token<'a>, Span = SimpleSpan>,
 {
-    let time = select! {
-        Token::IntegerNumberMillisecond(ms) => NumVal::Integer(ms as i64),
-        Token::FloatingNumberMillisecond(ms) => NumVal::Floating(ms).integerize_unit_val(),
-    }
-    .labelled("time");
+    let newlines = just(Token::NewLine).repeated();
 
-    let way = select! {
-        Token::IntegerNumberMillimeter(millis) => NumVal::Integer(millis as i64),
-        Token::FloatingNumberMillimeter(millis) => NumVal::Floating(millis).integerize_unit_val(),
-    }
-    .labelled("way");
+    let mut file_content = Recursive::declare();
 
-    let timerange = time
-        .then_ignore(just(Token::OpRange))
-        .then(time)
-        .try_map(|(from, to), span| {
-            Ok(Rhs::Range {
-                from: {
-                    Val::UnitedVal(UnitVal {
-                        val: {
-                            match from {
-                                NumVal::Floating(_) => unreachable!("integerised before"),
-                                NumVal::Integer(i) => {
-                                    if i < 0 {
-                                        return Err(Rich::custom(
-                                            span,
-                                            "Negative Integer Number for Timespan.",
-                                        ));
-                                    } else {
-                                        i as u64
-                                    }
-                                }
-                            }
-                        },
-                        unit: Unit::TimeMilliseconds,
-                    })
-                },
-                to: Val::UnitedVal(UnitVal {
-                    val: match to {
-                        NumVal::Floating(_) => unreachable!("integerised before"),
-                        NumVal::Integer(i) => {
-                            if i < 0 {
-                                return Err(Rich::custom(
-                                    span,
-                                    "Negative Integer Number for Timespan.",
-                                ));
-                            } else {
-                                i as u64
-                            }
-                        }
-                    },
-                    unit: Unit::TimeMilliseconds,
-                }),
-            })
-        })
-        .labelled("time range");
+    let rhs = recursive(|rhs| {
+        let val =
+            {
+                let time = select! {
+                Token::IntegerNumberMillisecond(ms) => NumVal::Integer(ms),
+                Token::FloatingNumberMillisecond(ms) => NumVal::Floating(ms).integerize_unit_val(),
+            }
+            .map(|val| Val::UnitedVal(UnitVal { val: val.as_int(), unit: Unit::TimeMilliseconds }));
 
-    let wayrange = way
-        .then_ignore(just(Token::OpRange))
-        .then(way)
-        .try_map(|(from, to), span| {
-            Ok(Rhs::Range {
-                from: Val::UnitedVal(UnitVal {
-                    val: match from {
-                        NumVal::Floating(_) => unreachable!("integerised before"),
-                        NumVal::Integer(i) => {
-                            if i < 0 {
-                                return Err(Rich::custom(
-                                    span,
-                                    "Negative Integer Number for Wayspan.",
-                                ));
-                            } else {
-                                i as u64
-                            }
-                        }
-                    },
-                    unit: Unit::WayMillimeter,
-                }),
-                to: Val::UnitedVal(UnitVal {
-                    val: match to {
-                        NumVal::Floating(_) => unreachable!("integerised before"),
-                        NumVal::Integer(i) => {
-                            if i < 0 {
-                                return Err(Rich::custom(
-                                    span,
-                                    "Negative Integer Number for Wayspan.",
-                                ));
-                            } else {
-                                i as u64
-                            }
-                        }
-                    },
-                    unit: Unit::WayMillimeter,
-                }),
-            })
-        })
-        .labelled("way range");
+                let way = select! {
+                Token::IntegerNumberMillimeter(mm) => NumVal::Integer(mm),
+                Token::FloatingNumberMillimeter(mm) => NumVal::Floating(mm).integerize_unit_val(),
+            }
+            .map(|val| Val::UnitedVal(UnitVal { val: val.as_int(), unit: Unit::WayMillimeter }));
 
-    let numvalue = select! {
-            Token::IntegerNumber(i) => Rhs::Val(Val::NumVal(NumVal::Integer(i))),
-            Token::FloatingNumber(f) => Rhs::Val(Val::NumVal(NumVal::Floating(f))),
-    }
-    .labelled("number value");
+                let number = select! {
+                    Token::IntegerNumber(i) => NumVal::Integer(i),
+                    Token::FloatingNumber(f) => NumVal::Floating(f),
+                }
+                .map(Val::NumVal);
 
-    let value = select! {
-            Token::IntegerNumber(i) => Rhs::Val(Val::NumVal(NumVal::Integer(i))),
-            Token::FloatingNumber(f) => Rhs::Val(Val::NumVal(NumVal::Floating(f))),
+                choice((time, way, number))
+            };
+
+        let range = val
+            .clone()
+            .then_ignore(just(Token::OpRange))
+            .then(val.clone())
+            .try_map(|(from, to), span| {
+                if let (Val::NumVal(from_n), Val::NumVal(to_n)) = (&from, &to) {
+                    if std::mem::discriminant(from_n) != std::mem::discriminant(to_n) {
+                        return Err(Rich::custom(
+                            span,
+                            "Cannot create a range between an integer and a float.",
+                        ));
+                    }
+                }
+                Ok(Rhs::Range { from, to })
+            });
+
+        let empty_range = just(Token::OpRange).to(Rhs::EmptyRange);
+
+        let primitive = select! {
             Token::String(s) => Rhs::Val(Val::StringVal(s.to_owned())),
             Token::True => Rhs::Val(Val::BoolVal(true)),
             Token::False => Rhs::Val(Val::BoolVal(false)),
-    }
-    .labelled("value");
+        };
 
-    let numberrange = numvalue
-        .then_ignore(just(Token::OpRange))
-        .then(value)
-        .try_map(|(from, to), span| match (&from, &to) {
-            (
-                Rhs::Val(Val::NumVal(NumVal::Floating(_))),
-                Rhs::Val(Val::NumVal(NumVal::Integer(_))),
-            )
-            | (
-                Rhs::Val(Val::NumVal(NumVal::Integer(_))),
-                Rhs::Val(Val::NumVal(NumVal::Floating(_))),
-            ) => {
-                return Err(Rich::custom(span, "Cannot span between float and integer."));
-            }
-            (_, _) => Ok((from, to)),
-        })
-        .map(|(from, to)| {
-            let from = match from {
-                Rhs::Val(Val::NumVal(nv)) => nv,
-                _ => unreachable!(),
-            };
-            let to = match to {
-                Rhs::Val(Val::NumVal(nv)) => nv,
-                _ => unreachable!(),
-            };
-
-            Rhs::Range {
-                from: Val::NumVal(from),
-                to: Val::NumVal(to),
-            }
-        })
-        .labelled("number range");
-
-    let variable = select! {
-            Token::VarNamespace(ns) => ns.to_owned(),
-        }
-        .repeated()
-        .collect::<Vec<_>>()
-        .then(select! {
-                Token::Variable(var) => Rhs::Var(Var::User { name: var.to_owned(), namespace: vec![] }),
-                Token::PredefVariable(var) => Rhs::Var(Var::Predef { name: var.to_owned(), namespace: vec![] }),
-            })
-        .map(|(ns, var)| {
-                let var = match var {
-                    Rhs::Var(var) => match var {
-                        Var::User { name, namespace: _} => {
-                            Var::User { name, namespace: ns }
-                        },
-                        Var::Predef { name, namespace: _ } => {
-                            Var::Predef { name, namespace: ns }
-                        },
-                        _ => unreachable!(),
-                    },
-                    _ => unreachable!(),
-                };
-
-                Rhs::Var(var)
-            });
-
-    let term = select! {
-        Token::Path(p) => Rhs::Path(p.to_owned()),
-    }
-    .or(variable)
-    .labelled("term");
-
-    let range = choice((numberrange, timerange.clone(), wayrange));
-
-    let rhs_array = recursive(|rhs_array| {
-        choice((term.clone(), range.clone(), value.clone(), rhs_array))
-            .separated_by(just(Token::Comma).then_ignore(just(Token::NewLine).repeated()))
+        let var_path = select! { Token::Identifier(ident) => ident.to_string() }
+            .separated_by(just(Token::Dot))
             .at_least(1)
+            .collect::<Vec<String>>();
+
+        let variable = var_path.map(|path| {
+            let name = path.last().unwrap().clone();
+            let namespace = path.iter().take(path.len() - 1).cloned().collect();
+            if name.starts_with('_') {
+                Rhs::Var(Var::Predef {
+                    name: name[1..].to_string(),
+                    namespace,
+                })
+            } else {
+                Rhs::Var(Var::User { name, namespace })
+            }
+        });
+
+        let array = rhs
+            .clone()
+            .separated_by(just(Token::Comma).then_ignore(newlines.clone()))
+            .allow_trailing()
             .collect::<Vec<_>>()
-            .delimited_by(just(Token::LParen), just(Token::RParen))
-            .map(|arr: Vec<Rhs>| {
-                Rhs::Array(arr.into_iter().map(|r| Box::new(r)).collect::<Vec<_>>())
-            })
+            .delimited_by(just(Token::LBracket), just(Token::RBracket))
+            .map(|arr| Rhs::Array(arr.into_iter().map(Box::new).collect()));
+
+        choice((
+            range,
+            empty_range,
+            val.map(Rhs::Val),
+            primitive,
+            select! { Token::Path(p) => Rhs::Path(p.to_owned()) },
+            variable,
+            array,
+        ))
     });
 
-    let rhs = choice((term, range, value, rhs_array));
-
-    // parse a comma-separated list of terms (the left-hand side).
-    let comma = just(Token::Comma).then_ignore(just(Token::NewLine).repeated());
     let multi_rhs = rhs
-        .clone()
-        .separated_by(comma)
+        .separated_by(just(Token::Comma))
         .at_least(1)
-        .collect::<Vec<_>>()
-        .labelled("rule term");
+        .collect::<Vec<_>>();
 
-    let op = select! {
-        Token::OpAssignToLeft => Operator::Left,
-    }
-    .labelled("operator");
+    let op = select! { Token::OpAssignToLeft => Operator::Left };
 
-    // a statement is: lhs, then an operator, then a single term (the right-hand side).
-    let statement = multi_rhs
-        .clone()
-        .then(op)
-        .then(multi_rhs)
-        .then_ignore(just(Token::NewLine).repeated())
-        .try_map(|((lhs, op), rhs), span| {
-            Ok(StatementKindPass1::VariableDef(match op {
-                Operator::Left => {
-                    if rhs.len() > 1 {
-                        return Err(Rich::custom(
-                            span,
-                            "Can only assign one term but to multiple variables.",
-                        ));
-                    }
-                    if let Some(rhs) = rhs.first() {
-                        let mut vars: Vec<Var> = Vec::new();
-                        for l in lhs.iter() {
-                            match l {
-                                Rhs::Var(var) => {
-                                    vars.push(var.clone());
-                                }
-                                _ => {
-                                    return Err(Rich::custom(
-                                        span,
-                                        "Can only assign to variables.",
-                                    ));
-                                }
-                            }
-                        }
-
-                        Statement::AssignLeft {
-                            lhs: vars,
-                            rhs: rhs.clone(),
-                        }
-                    } else {
-                        return Err(Rich::custom(span, "Missing right operand."));
-                    }
-                }
-            }))
-        })
-        .labelled("statement");
+    let lhs_paths = select! { Token::Identifier(ident) => ident.to_string() }
+        .separated_by(just(Token::Dot))
+        .at_least(1)
+        .collect::<Vec<String>>()
+        .separated_by(just(Token::Comma))
+        .at_least(1)
+        .collect::<Vec<Vec<String>>>();
 
     let include = just(Token::OpAssignToLeft)
-        .ignore_then(select! {
-            Token::Path(p) => p.to_owned(),
-        })
-        .then_ignore(just(Token::NewLine))
+        .ignore_then(select! { Token::Path(p) => p.to_owned() })
+        .then_ignore(just(Token::NewLine).repeated().at_least(1).or(end()))
         .map(|path| StatementKindPass1::Include {
             namespace: vec![],
             path,
         });
 
-    let namespace_block = recursive(|nsb| {
-        select! {
-            Token::VarNamespace(ns) => ns,
-        }
-        .repeated()
-        .at_least(1)
-        .collect()
-        .then(
-            choice((statement.clone(), include.clone(), nsb))
-                .repeated()
-                .collect::<Vec<_>>()
-                .delimited_by(
-                    just(Token::BlockStart).then_ignore(just(Token::NewLine).repeated()),
-                    just(Token::BlockEnd).then_ignore(just(Token::NewLine).repeated()),
-                ),
-        )
-        .map(|(ns, stmts): (Vec<&'_ str>, Vec<StatementKindPass1>)| {
-            StatementKindPass1::VariableNamespaceBlock {
-                ns,
-                stmts: stmts
-                    .into_iter()
-                    .map(|stmtk| Box::new(stmtk))
-                    .collect::<Vec<_>>(),
-            }
-        })
-    });
-
-    let one_of_wind_fns = choice((statement, namespace_block, include));
-    let newlines = just(Token::NewLine).repeated();
-    let one_block = newlines
+    let block = file_content
         .clone()
-        .ignore_then((one_of_wind_fns.then_ignore(newlines)).repeated().collect())
-        .then_ignore(end());
-    one_block
+        .repeated()
+        .collect::<Vec<_>>()
+        .delimited_by(
+            just(Token::BlockStart).then_ignore(newlines.clone()),
+            just(Token::BlockEnd),
+        );
+
+    let statement_starting_with_path = lhs_paths
+        .then(
+            op.then(multi_rhs)
+                .then_ignore(just(Token::NewLine).repeated().at_least(1).or(end()))
+                .map(|(op, rhs)| (Some((op, rhs)), None))
+                .or(block.map(|stmts| (None, Some(stmts)))),
+        )
+        .try_map(|(lhs_paths, (assignment_opt, block_opt)), span| {
+            if let Some(stmts) = block_opt {
+                if lhs_paths.len() > 1 {
+                    return Err(Rich::custom(
+                        span,
+                        "Namespace blocks cannot be defined for multiple paths at once.",
+                    ));
+                }
+                Ok(StatementKindPass1::VariableNamespaceBlock {
+                    ns: lhs_paths.into_iter().next().unwrap(),
+                    stmts: stmts.into_iter().map(Box::new).collect(),
+                })
+            } else if let Some((op, rhs)) = assignment_opt {
+                let vars = lhs_paths
+                    .into_iter()
+                    .map(|path| {
+                        let name = path.last().unwrap().clone();
+                        let namespace = path.iter().take(path.len() - 1).cloned().collect();
+                        if name.starts_with('_') {
+                            Var::Predef {
+                                name: name[1..].to_string(),
+                                namespace,
+                            }
+                        } else {
+                            Var::User { name, namespace }
+                        }
+                    })
+                    .collect::<Vec<Var>>();
+
+                match op {
+                    Operator::Left => {
+                        if rhs.len() > 1 && vars.len() != rhs.len() {
+                            return Err(Rich::custom(
+                                span,
+                                "Mismatched number of variables and values in assignment.",
+                            ));
+                        }
+                        if rhs.is_empty() {
+                            return Err(Rich::custom(span, "Missing right operand."));
+                        }
+                        Ok(StatementKindPass1::VariableDef(Statement::AssignLeft {
+                            lhs: vars,
+                            rhs,
+                        }))
+                    }
+                }
+            } else {
+                unreachable!()
+            }
+        });
+
+    file_content
+        .define(choice((include, statement_starting_with_path)).then_ignore(newlines.clone()));
+
+    newlines
+        .clone()
+        .ignore_then(file_content.repeated().collect())
+        .then_ignore(end())
 }
 
 pub fn compile_file(
@@ -1061,6 +919,7 @@ fn truncate_namespace_rhs(ns: &[String], rhs: &Rhs) -> Rhs {
                 .collect::<Vec<_>>(),
         ),
         Rhs::Range { from: _, to: _ } => rhs.clone(),
+        Rhs::EmptyRange => Rhs::EmptyRange,
         Rhs::Var(var) => Rhs::Var(truncate_namespace_var(ns, var)),
         Rhs::Path(_) => rhs.clone(),
         Rhs::Val(_) => rhs.clone(),
@@ -1085,7 +944,10 @@ fn truncate_namespace_stmt(ns: &[String], stmt: &Statement) -> Statement {
                 })
                 .map(|l| truncate_namespace_var(ns, l))
                 .collect::<Vec<_>>();
-            let r = truncate_namespace_rhs(ns, rhs);
+            let r = rhs
+                .iter()
+                .map(|r_item| truncate_namespace_rhs(ns, r_item))
+                .collect();
 
             Statement::AssignLeft { lhs: l, rhs: r }
         }
@@ -1134,8 +996,17 @@ impl VariableHistory {
         self.ast.iter().for_each(|f| match f {
             StatementKindOwned::VariableDef(statement) => match statement {
                 Statement::AssignLeft { lhs, rhs } => {
-                    for l in lhs {
-                        self.var_cache.insert(l.clone(), rhs.clone());
+                    if rhs.len() == 1 {
+                        // Broadcast single RHS to all LHS
+                        let rhs_val = rhs.first().unwrap();
+                        for l in lhs {
+                            self.var_cache.insert(l.clone(), rhs_val.clone());
+                        }
+                    } else {
+                        // Pair LHS with RHS
+                        for (l, r) in lhs.iter().zip(rhs.iter()) {
+                            self.var_cache.insert(l.clone(), r.clone());
+                        }
                     }
                 }
             },
@@ -1168,7 +1039,7 @@ impl VariableHistory {
 
                 vars_in_ns.push(StatementKindOwned::VariableDef(Statement::AssignLeft {
                     lhs: vec![wvar],
-                    rhs: rhs.clone(),
+                    rhs: vec![rhs.clone()],
                 }));
             }
         }
@@ -1205,27 +1076,40 @@ impl VariableHistory {
             match &stmt {
                 &StatementKindOwned::VariableDef(statement) => match statement {
                     Statement::AssignLeft { lhs, rhs } => {
-                        if lhs.contains(var) {
-                            val = Some(match rhs {
-                                Rhs::Var(var) => match self.resolve_recursive(&var, Some(i))? {
-                                    None => Rhs::Val(Val::StringVal(match var {
-                                        Var::User { name, namespace: _ } => name.clone(),
-                                        Var::Log => {
-                                            return Err(anyhow!("Log can not be assigned."));
+                        if let Some(index) = lhs.iter().position(|l| l == var) {
+                            let rhs_to_process = if rhs.len() == 1 {
+                                rhs.first()
+                            } else {
+                                rhs.get(index)
+                            };
+
+                            if let Some(rhs_val) = rhs_to_process {
+                                val = Some(match rhs_val {
+                                    Rhs::Var(var_to_resolve) => {
+                                        match self.resolve_recursive(var_to_resolve, Some(i))? {
+                                            None => {
+                                                Rhs::Val(Val::StringVal(match var_to_resolve {
+                                                    Var::User { name, namespace: _ } => {
+                                                        name.clone()
+                                                    }
+                                                    Var::Log => {
+                                                        return Err(anyhow!(
+                                                            "Log can not be assigned."
+                                                        ));
+                                                    }
+                                                    Var::Predef { .. } => {
+                                                        return Err(anyhow!(
+                                                            "Predef variables can not be assigned."
+                                                        ));
+                                                    }
+                                                }))
+                                            }
+                                            Some(resolved_rhs) => resolved_rhs,
                                         }
-                                        Var::Predef {
-                                            name: _,
-                                            namespace: _,
-                                        } => {
-                                            return Err(anyhow!(
-                                                "Predef variables can not be assigned."
-                                            ));
-                                        }
-                                    })),
-                                    Some(rhs) => rhs,
-                                },
-                                _ => rhs.clone(),
-                            });
+                                    }
+                                    _ => rhs_val.clone(),
+                                });
+                            }
                         }
                     }
                 },
@@ -1352,7 +1236,9 @@ fn resolve_stmt(
 ) -> anyhow::Result<()> {
     match stmt {
         Statement::AssignLeft { lhs: _, rhs } => {
-            resolve_rhs_recursive(rhs, var_history, i)?;
+            for r in rhs.iter_mut() {
+                resolve_rhs_recursive(r, var_history, i)?;
+            }
         }
     }
 
@@ -1531,6 +1417,12 @@ mod tests {
          a.b = a.b.c
          a.b.c = 6
          wind._l = /cloud
+
+         bla, blub = 2, 4
+
+         wal, du = 9
+
+         empty_range = ..
         ";
 
         // let mut a = Token::lexer(SRC);
@@ -1561,6 +1453,41 @@ mod tests {
         assert!(res.is_some());
         let res = res.unwrap();
         assert_eq!(res, Rhs::Val(Val::NumVal(NumVal::Integer(7))));
+
+        let res = eval.vars.resolve("bla");
+        assert!(res.is_ok());
+        let res = res.unwrap();
+        assert!(res.is_some());
+        let res = res.unwrap();
+        assert_eq!(res, Rhs::Val(Val::NumVal(NumVal::Integer(2))));
+
+        let res = eval.vars.resolve("blub");
+        assert!(res.is_ok());
+        let res = res.unwrap();
+        assert!(res.is_some());
+        let res = res.unwrap();
+        assert_eq!(res, Rhs::Val(Val::NumVal(NumVal::Integer(4))));
+
+        let res = eval.vars.resolve("wal");
+        assert!(res.is_ok());
+        let res = res.unwrap();
+        assert!(res.is_some());
+        let res = res.unwrap();
+        assert_eq!(res, Rhs::Val(Val::NumVal(NumVal::Integer(9))));
+
+        let res = eval.vars.resolve("du");
+        assert!(res.is_ok());
+        let res = res.unwrap();
+        assert!(res.is_some());
+        let res = res.unwrap();
+        assert_eq!(res, Rhs::Val(Val::NumVal(NumVal::Integer(9))));
+
+        let res = eval.vars.resolve("empty_range");
+        assert!(res.is_ok());
+        let res = res.unwrap();
+        assert!(res.is_some());
+        let res = res.unwrap();
+        assert_eq!(res, Rhs::EmptyRange);
     }
 
     #[test]
@@ -1571,7 +1498,7 @@ mod tests {
 
         # including in namespace blocks will prepend the namespaces to the included AST
         # (excluding rules, they are always global)
-        c.{
+        c {
             = ./test.rl
         }
         ";
@@ -1598,17 +1525,21 @@ mod tests {
     #[test]
     fn var_declare_blocks() {
         const SRC: &str = r"
-        a.{
+        a {
             b = 7
         }
 
-        c.{
+        c {
             t = 5
 
-            d.{
+            d {
                 o = 1
             }
             i = 95
+
+            e.f {
+                bla = 1
+            }
         }
         ";
 
@@ -1661,12 +1592,12 @@ mod tests {
     #[test]
     fn resolve_ns() {
         const SRC: &str = r"
-        _bag.{
-            lidar.{
+        _bag {
+            lidar {
                 short = l
                 type = Pointcloud2
             }
-            imu.{
+            imu {
                 _short = i
                 _type = Imu
             }
@@ -1737,6 +1668,40 @@ mod tests {
                 Box::new(Rhs::Val(Val::StringVal("Blub".to_owned()))),
             ])
         );
+    }
+
+    #[test]
+    fn all() {
+        const SRC: &str = r#"
+        # a comment
+variable = true
+
+time = 1s
+time_is_running = 1ms..2mins # ranges convert automatically
+
+len = 1cm..1m
+
+# _ signals a variable the interpreter is looking for.
+_internal = time_is_running
+
+my.super.long.prefix.var = 0..100 # ranges on namespaced variable "var"
+
+# nested
+my.super {
+
+    long.prefix {
+        next_var = "UTF-🎱 Strings"
+    }
+
+    something_else = -99.018
+}
+
+mat = [ [ 6, 1, 9 ],
+        [ 3, 1, 8 ] ]
+
+        "#;
+        let eval = compile_code(SRC);
+        assert!(eval.is_ok());
     }
 
     // #[test]
