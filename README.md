@@ -88,7 +88,7 @@ In Ratslang, including is done by assigning a path to the current namespace. All
 ~~~awk
 = ./path_relative_to_current_file.rl
 
-strangefile.{
+strangefile {
   = ./../namespacing_contents.rl
 }
 ~~~
