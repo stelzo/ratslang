@@ -62,7 +62,7 @@ Currently, Ratslang doesn't support expressions like arithmetic, loops, or condi
 
 * **Boolean**: `true`, `false`
 * **Integer**: Example: `42`, `-100`
-* **Floating-point**: Example: `69.42`, `.1`, `6.`, `-3.14`
+* **Floating-point**: Example: `69.42`, `-3.14`
 * **String**: Quotes can be omitted if the string doesn't conflict with a previously defined variable. Example: `"my string"`, `another_string_without_quotes`
 * **Path**: Example: `./somewhere/relative.dat`, `/or/absolute`, `./../backneed/dotfirst.launch.py`
 * **Array/Matrix**: Newlines after commas are also supported for readability. `[ <Type>, <Type>, ... ]`, `[ 42, World, [ "nested" ] ]`, `[ [ 1, 2, 3 ], [ 4, 5, 6 ] ]`
@@ -75,9 +75,10 @@ Currently, Ratslang doesn't support expressions like arithmetic, loops, or condi
     * **Meter**: `m`. Example: `10m`, `0.5m`
     * **Centimeter**: `cm`. Example: `50cm`, `2.5cm`
     * **Millimeter**: `mm`. Example: `100mm`, `1mm`
-* **Range**:
-    * **Time**: Example: `1ms..5hours`
-    * **Length**: Example: `1mm..100m`
+* **Range**: Including unbound variants and empty `..`.
+    * **Time**: Example: `1ms..5.3hours`, `6s..`
+    * **Length**: Example: `1mm..100m`, `..4m`
+    * **Numbers**: Example: `-4..l`, `6.00001..6.0001`
 
 ---
 

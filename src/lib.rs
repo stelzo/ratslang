@@ -294,7 +294,7 @@ pub struct UnitVal {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Rhs {
-    Range { from: Val, to: Val },
+    Range { from: Option<Val>, to: Option<Val> },
     EmptyRange,
     Var(Var),
     Path(String),
@@ -645,7 +645,7 @@ where
                 choice((time, way, number))
             };
 
-        let range = val
+        let bounded_range = val
             .clone()
             .then_ignore(just(Token::OpRange))
             .then(val.clone())
@@ -658,8 +658,27 @@ where
                         ));
                     }
                 }
-                Ok(Rhs::Range { from, to })
+                Ok(Rhs::Range {
+                    from: Some(from),
+                    to: Some(to),
+                })
             });
+
+        let lower_bounded_range =
+            val.clone()
+                .then_ignore(just(Token::OpRange))
+                .map(|from| Rhs::Range {
+                    from: Some(from),
+                    to: None,
+                });
+
+        let upper_bounded_range =
+            just(Token::OpRange)
+                .ignore_then(val.clone())
+                .map(|to| Rhs::Range {
+                    from: None,
+                    to: Some(to),
+                });
 
         let empty_range = just(Token::OpRange).to(Rhs::EmptyRange);
 
@@ -696,7 +715,9 @@ where
             .map(|arr| Rhs::Array(arr.into_iter().map(Box::new).collect()));
 
         choice((
-            range,
+            bounded_range,
+            lower_bounded_range,
+            upper_bounded_range,
             empty_range,
             val.map(Rhs::Val),
             primitive,
@@ -1667,6 +1688,87 @@ mod tests {
                 Box::new(Rhs::Val(Val::StringVal("bla with space".to_owned()))),
                 Box::new(Rhs::Val(Val::StringVal("Blub".to_owned()))),
             ])
+        );
+    }
+
+    #[test]
+    fn unbounded_ranges() {
+        const SRC: &str = r"
+        open_upper = 1..
+        open_lower = ..2
+        open_upper_unit = 3m..
+        open_lower_unit = ..4s
+        empty = ..
+        num_float = 2.2..6.5
+        num_int = -2..6
+        ";
+
+        let eval = compile_code(SRC);
+        assert!(eval.is_ok(), "Failed to compile: {:?}", eval.err());
+        let mut eval = eval.unwrap();
+        eval.vars.populate_cache();
+
+        let res_upper = eval.vars.resolve("open_upper").unwrap().unwrap();
+        assert_eq!(
+            res_upper,
+            Rhs::Range {
+                from: Some(Val::NumVal(NumVal::Integer(1))),
+                to: None
+            }
+        );
+
+        let res_lower = eval.vars.resolve("open_lower").unwrap().unwrap();
+        assert_eq!(
+            res_lower,
+            Rhs::Range {
+                from: None,
+                to: Some(Val::NumVal(NumVal::Integer(2)))
+            }
+        );
+
+        let res_upper_unit = eval.vars.resolve("open_upper_unit").unwrap().unwrap();
+        assert_eq!(
+            res_upper_unit,
+            Rhs::Range {
+                from: Some(Val::UnitedVal(UnitVal {
+                    val: 3000,
+                    unit: Unit::WayMillimeter
+                })),
+                to: None
+            }
+        );
+
+        let res_lower_unit = eval.vars.resolve("open_lower_unit").unwrap().unwrap();
+        assert_eq!(
+            res_lower_unit,
+            Rhs::Range {
+                from: None,
+                to: Some(Val::UnitedVal(UnitVal {
+                    val: 4000,
+                    unit: Unit::TimeMilliseconds
+                }))
+            }
+        );
+
+        let res_empty = eval.vars.resolve("empty").unwrap().unwrap();
+        assert_eq!(res_empty, Rhs::EmptyRange);
+
+        let num_floatrange = eval.vars.resolve("num_float").unwrap().unwrap();
+        assert_eq!(
+            num_floatrange,
+            Rhs::Range {
+                from: Some(Val::NumVal(NumVal::Floating(2.2))),
+                to: Some(Val::NumVal(NumVal::Floating(6.5))),
+            }
+        );
+
+        let num_intrange = eval.vars.resolve("num_int").unwrap().unwrap();
+        assert_eq!(
+            num_intrange,
+            Rhs::Range {
+                from: Some(Val::NumVal(NumVal::Integer(-2))),
+                to: Some(Val::NumVal(NumVal::Integer(6))),
+            }
         );
     }
 
