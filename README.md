@@ -114,7 +114,10 @@ let ast = ratslang::compile_file(&file.to_path_buf(), None, None).unwrap();
 Then, you can safely read the variables you need using Rust's powerful pattern matching.
 
 ~~~rust
-// "Just get the variable"
+// "Just get the variable" with macro and direct conversion
+let k_neighbors = resolve_var!(ast, "k_neighborhood", as usize, Rhs::Val(Val::NumVal(NumVal::Integer(i))) => {i})?;
+
+// ... without macro and AST types
 let avar = ast.vars.resolve("password").unwrap();
 let avar = ast.vars.resolve("_my_namespace._some_var").unwrap();
 assert_eq!(avar, Some(ratslang::Rhs::Val(ratslang::Val::StringVal(":)".to_owned()))));

@@ -1360,6 +1360,165 @@ pub fn compile_code_with_state(
     Err(anyhow!("Could not parse ratslang code."))
 }
 
+// -- Macros --
+
+/// Gets a length range.
+/// It handles `..` and `100mm..2000mm` syntax, converting all values to meters (f32).
+#[macro_export]
+macro_rules! resolve_length_range_meters_float {
+    ($ns:expr, $field:expr, $default_from:expr, $default_to:expr) => {{
+        let convert_mm_to_meters = |val: &Val| -> anyhow::Result<f32> {
+            match val {
+                Val::UnitedVal(uv) if uv.unit == Unit::WayMillimeter => {
+                    Ok(Length::new::<millimeter>(uv.val as f32).get::<meter>())
+                },
+                _ => Err(anyhow!("Expected a united value with 'mm' unit for length range '{}'", $field))
+            }
+        };
+
+        let rhs_val = resolve_var!($ns, $field, as &Rhs, r => {r})?;
+        match rhs_val {
+            Rhs::EmptyRange => Ok(($default_from, $default_to)),
+            Rhs::Range { from, to } => {
+                let from_val = from.as_ref().map_or(Ok($default_from), |v| convert_mm_to_meters(v))?;
+                let to_val = to.as_ref().map_or(Ok($default_to), |v| convert_mm_to_meters(v))?;
+                Ok((from_val, to_val))
+            }
+            _ => Err(anyhow!("Expected a range expression for field '{}'", $field))
+        }
+    }};
+}
+
+#[macro_export]
+macro_rules! resolve_var {
+    // Arm for variable names passed as identifiers
+    ($asts:expr, $var_name_ident:ident, as $target_type:ty, $($pattern:pat_param)|+ => $extraction_block:block) => {{
+        let __var_name_str = stringify!($var_name_ident);
+        let __resolved_opt = match $asts.user.resolve(__var_name_str)? {
+            Some(val) => Some(val),
+            None => $asts.defaults.resolve(__var_name_str)?,
+        };
+
+        match __resolved_opt {
+            Some(__resolved_val) => match __resolved_val {
+                $($pattern)|+ => {
+                    let __extracted_val = $extraction_block;
+                    Ok(__extracted_val)
+                }
+                _ => Err(anyhow!(format!(
+                    "Pattern mismatch for '{}'. Expected pattern for type `{}`.",
+                    __var_name_str,
+                    stringify!($target_type)
+                ))),
+            }?
+            .try_into()
+            .map_err(|e| {
+                anyhow!(
+                    "Failed to convert '{}' to type `{}`: {:?}",
+                    __var_name_str,
+                    stringify!($target_type),
+                    e
+                )
+            }),
+            None => Err(anyhow!(concat!(
+                "Required variable '",
+                stringify!($var_name_ident),
+                "' not found in any configuration."
+            ))),
+        }
+    }};
+
+    // Arm for variable names passed as string expressions
+    ($asts:expr, $var_name_expr:expr, as $target_type:ty, $($pattern:pat_param)|+ => $extraction_block:block) => {{
+        let __var_name_str = $var_name_expr;
+        let __resolved_opt = match $asts.user.resolve(__var_name_str)? {
+            Some(val) => Some(val),
+            None => $asts.defaults.resolve(__var_name_str)?,
+        };
+
+        match __resolved_opt {
+            Some(__resolved_val) => match __resolved_val {
+                $($pattern)|+ => {
+                    let __extracted_val = $extraction_block;
+                    Ok(__extracted_val)
+                }
+                _ => Err(anyhow!(format!(
+                    "Pattern mismatch for '{}'. Expected pattern for type `{}`.",
+                    __var_name_str,
+                    stringify!($target_type)
+                ))),
+            }?
+            .try_into()
+            .map_err(|e| {
+                anyhow!(
+                    "Failed to convert '{}' to type `{}`: {:?}",
+                    __var_name_str,
+                    stringify!($target_type),
+                    e
+                )
+            }),
+            None => Err(anyhow!(format!(
+                "Required variable '{}' not found in any configuration.",
+                __var_name_str
+            ))),
+        }
+    }};
+}
+
+/// Gets a range from floating numbers while also accepting integers by converting them to floats.
+#[macro_export]
+macro_rules! resolve_float_force_range {
+    ($ns:expr, $field:expr, $default_from:expr, $default_to:expr) => {{
+        let rhs_val = resolve_var!($ns, $field, as &Rhs, r => {r})?;
+        match rhs_val {
+            Rhs::EmptyRange => Ok(($default_from, $default_to)),
+            Rhs::Range { from, to } => {
+                let from_val = match from {
+                    Some(Val::NumVal(NumVal::Floating(f))) => f as f32,
+                    Some(Val::NumVal(NumVal::Integer(i))) => i as f32,
+                    None => $default_from,
+                    _ => return Err(anyhow!(format!("Expected numeric value for 'from' in float range '{}'", $field))),
+                };
+                let to_val = match to {
+                    Some(Val::NumVal(NumVal::Floating(f))) => f as f32,
+                    Some(Val::NumVal(NumVal::Integer(i))) => i as f32,
+                    None => $default_to,
+                    _ => return Err(anyhow!(format!("Expected numeric value for 'to' in float range '{}'", $field))),
+                };
+                Ok((from_val, to_val))
+            },
+            _ => Err(anyhow!(format!("Expected a range expression for field '{}'", $field)))
+        }
+    }};
+}
+
+/// Gets a range from floating numbers without implicit conversions.
+#[macro_export]
+macro_rules! resolve_float_range {
+    ($ns:expr, $field:expr, $default_from:expr, $default_to:expr) => {{
+        let rhs_val = resolve_var!($ns, $field, as &Rhs, r => {r})?;
+        match rhs_val {
+            Rhs::EmptyRange => Ok(($default_from, $default_to)),
+            Rhs::Range { from, to } => {
+                let from_val = match from {
+                    Some(Val::NumVal(NumVal::Floating(f))) => f as f32,
+                    Some(Val::NumVal(NumVal::Integer(_))) => return Err(anyhow!(format!("Expected floating value for 'from' in float range '{}'", $field))),
+                    None => $default_from,
+                    _ => return Err(anyhow!(format!("Expected numeric value for 'from' in float range '{}'", $field))),
+                };
+                let to_val = match to {
+                    Some(Val::NumVal(NumVal::Floating(f))) => f as f32,
+                    Some(Val::NumVal(NumVal::Integer(_))) => return Err(anyhow!(format!("Expected floating value for 'from' in float range '{}'", $field))),
+                    None => $default_to,
+                    _ => return Err(anyhow!(format!("Expected numeric value for 'to' in float range '{}'", $field))),
+                };
+                Ok((from_val, to_val))
+            },
+            _ => Err(anyhow!(format!("Expected a range expression for field '{}'", $field)))
+        }
+    }};
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
