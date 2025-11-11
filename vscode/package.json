@@ -1,0 +1,25 @@
+{
+  "name": "rl",
+  "displayName": "Ratslang",
+  "description": "Ratslang Language Support",
+  "version": "0.1.0",
+  "engines": {
+    "vscode": "^1.105.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "contributes": {
+    "languages": [{
+      "id": "rl",
+      "aliases": ["Ratslang", "rl"],
+      "extensions": [".rl"],
+      "configuration": "./language-configuration.json"
+    }],
+    "grammars": [{
+      "language": "rl",
+      "scopeName": "source.rl",
+      "path": "./syntaxes/rl.tmLanguage.json"
+    }]
+  }
+}
