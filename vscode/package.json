@@ -1,11 +1,17 @@
 {
-  "name": "rl",
+  "name": "ratslang",
   "displayName": "Ratslang",
-  "description": "Ratslang Language Support",
+  "description": "Syntax Highlighting for the Ratslang configuration language",
   "version": "0.1.0",
   "engines": {
     "vscode": "^1.105.0"
   },
+  "publisher": "stelzo",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/stelzo/ratslang.git"
+  },
+  "license": "(MIT OR Apache-2.0)",
   "categories": [
     "Programming Languages"
   ],
