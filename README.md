@@ -101,7 +101,8 @@ strangefile {
 Add this to your `Cargo.toml`.
 
 ~~~toml
-ratslang = { version = "0.1.0-alpha.3", git = "https://github.com/stelzo/ratslang", branch = "main" }
+[dependencies]
+ratslang = "0.1.0"
 ~~~
 
 First, you compile a Ratslang file to get a cleaned Abstract Syntax Tree (AST) with all variables resolved.
