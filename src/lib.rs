@@ -1,3 +1,72 @@
+//! # Ratslang
+//!
+//! A compact configuration language for physical systems with native support for time and length units.
+//!
+//! Ratslang solves the unit conversion problem that plagues physical system configuration, while keeping
+//! the implementation simple and declarative.
+//!
+//! ## Features
+//!
+//! - **Time units:** `ms`, `s`, `min`/`mins`, `hour`/`hours`
+//! - **Length units:** `mm`, `cm`, `m`
+//! - **Ranges:** `1mm..100m`, `5s..`, `..10m`, `..`
+//! - **Namespaces:** Dot notation (`sensor.range`) or blocks
+//! - **Includes:** Compose configuration files with namespace scoping
+//! - **Types:** Booleans, integers, floats, strings, paths, arrays
+//!
+//! ## Example
+//!
+//! ```rust
+//! use ratslang::compile_code;
+//!
+//! let source = r#"
+//!     distance = 100mm..2m
+//!     scan_rate = 10.5s
+//!     
+//!     sensor {
+//!         type = Lidar
+//!         enabled = true
+//!     }
+//! "#;
+//!
+//! let result = compile_code(source).unwrap();
+//! let distance = result.vars.resolve("distance").unwrap();
+//! ```
+//!
+//! ## Usage
+//!
+//! Compile and resolve variables:
+//!
+//! ```rust
+//! use ratslang::{compile_code, Rhs, Val, NumVal};
+//!
+//! let code = r#"
+//!     timeout = 5000
+//!     sensor.type = Lidar
+//!     sensor.range = 10
+//! "#;
+//!
+//! let ast = compile_code(code).unwrap();
+//!
+//! // Manual resolution
+//! let timeout = ast.vars.resolve("timeout").unwrap().unwrap();
+//! assert_eq!(timeout, Rhs::Val(Val::NumVal(NumVal::Integer(5000))));
+//!
+//! let name = ast.vars.resolve("sensor.type").unwrap().unwrap();
+//! assert_eq!(name, Rhs::Val(Val::StringVal("Lidar".to_string())));
+//!
+//! // Filter namespace
+//! let sensor = ast.vars.filter_ns(&["sensor"]);
+//! let range = sensor.resolve("range").unwrap().unwrap();
+//! assert_eq!(range, Rhs::Val(Val::NumVal(NumVal::Integer(10))));
+//! ```
+//!
+//! > **Note:** Ratslang is deliberately simple—no arithmetic, loops, or conditionals.
+//! 
+//! ## Syntax Highlighting
+//! 
+//! Syntax highlighting is available with [this tree-sitter grammar](https://github.com/stelzo/tree-sitter-ratslang) or [this VS Code extension](https://marketplace.visualstudio.com/items?itemName=stelzo.ratslang).
+
 use core::{fmt, panic};
 use std::{collections::HashMap, path::PathBuf, str::FromStr};
 
@@ -235,9 +304,12 @@ impl fmt::Display for Token<'_> {
     }
 }
 
+/// Represents a numeric value that can be either a floating-point or integer.
 #[derive(Debug, Clone, Copy)]
 pub enum NumVal {
+    /// A floating-point number.
     Floating(f64),
+    /// An integer number.
     Integer(i64),
 }
 
@@ -256,6 +328,8 @@ impl PartialEq for NumVal {
 impl Eq for NumVal {}
 
 impl NumVal {
+    /// Converts a floating-point value to an integer by rounding.
+    /// Integer values are returned unchanged.
     pub fn integerize_unit_val(self) -> NumVal {
         if let NumVal::Floating(f) = self {
             NumVal::Integer(f.round() as i64)
@@ -264,6 +338,11 @@ impl NumVal {
         }
     }
 
+    /// Returns the value as an integer, converting from float if necessary.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the conversion fails (should not happen after `integerize_unit_val`).
     pub fn as_int(&self) -> i64 {
         match self.integerize_unit_val() {
             NumVal::Integer(i) => i,
@@ -272,45 +351,69 @@ impl NumVal {
     }
 }
 
+/// Physical units supported by the language.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Unit {
+    /// Time measured in milliseconds.
     TimeMilliseconds,
+    /// Distance/length measured in millimeters.
     WayMillimeter,
 }
 
+/// A value in the language, which can be a number (with or without units), string, or boolean.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Val {
+    /// A numeric value with a physical unit.
     UnitedVal(UnitVal),
+    /// A numeric value without units.
     NumVal(NumVal),
+    /// A string value.
     StringVal(String),
+    /// A boolean value.
     BoolVal(bool),
 }
 
+/// A numeric value paired with a physical unit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct UnitVal {
+    /// The numeric value (stored as integer, representing the base unit).
     pub val: i64,
+    /// The physical unit of the value.
     pub unit: Unit,
 }
 
+/// Right-hand side of an assignment, representing various expression types.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Rhs {
+    /// A range expression with optional lower and upper bounds.
     Range { from: Option<Val>, to: Option<Val> },
+    /// An unbounded range expression (`..`).
     EmptyRange,
+    /// A variable reference.
     Var(Var),
+    /// A file path.
     Path(String),
+    /// A literal value.
     Val(Val),
+    /// An array of expressions.
     Array(Vec<Box<Self>>),
 }
 
+/// A variable reference with optional namespace qualification.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Var {
-    Log,
+    /// Predefined variable (starts with `_`).
     Predef {
+        /// Variable name (without the leading `_`).
         name: String,
+        /// Namespace path.
         namespace: Vec<String>,
     },
+    /// User-defined variable.
     User {
+        /// Variable name.
         name: String,
+        /// Namespace path.
         namespace: Vec<String>,
     },
 }
@@ -322,13 +425,13 @@ fn vec_prepend<T: Clone>(prepend: &[T], source: &[T]) -> Vec<T> {
 }
 
 impl Var {
+    /// Prepends a namespace path to this variable's existing namespace.
     pub fn add_namespace(self, ns: &Vec<String>) -> Self {
         match self {
             Var::User { name, namespace } => Var::User {
                 name,
                 namespace: vec_prepend(ns, &namespace),
             },
-            Var::Log => Var::Log,
             Var::Predef { name, namespace } => Var::Predef {
                 name,
                 namespace: vec_prepend(ns, &namespace),
@@ -370,12 +473,15 @@ impl FromStr for Var {
     }
 }
 
+/// The result of compiling and evaluating ratslang code.
 #[derive(Debug)]
 pub struct Evaluated {
+    /// The variable history containing all defined variables and their values.
     pub vars: VariableHistory,
 }
 
 impl Evaluated {
+    /// Creates a new empty evaluation result.
     pub fn new() -> Self {
         Self {
             vars: VariableHistory::new(vec![]),
@@ -383,8 +489,10 @@ impl Evaluated {
     }
 }
 
+/// The root of the abstract syntax tree.
 #[derive(Debug, Clone)]
 pub struct Root {
+    /// List of top-level statements (variable definitions).
     pub vardefs: Vec<Statement>,
 }
 
@@ -577,9 +685,16 @@ pub enum StatementPass1 {
     },
 }
 
+/// A statement in the language (currently only variable assignments).
 #[derive(Debug, Clone)]
 pub enum Statement {
-    AssignLeft { lhs: Vec<Var>, rhs: Vec<Rhs> },
+    /// Assignment statement with one or more variables on the left and expressions on the right.
+    AssignLeft { 
+        /// Variables being assigned to.
+        lhs: Vec<Var>, 
+        /// Expressions being assigned.
+        rhs: Vec<Rhs> 
+    },
 }
 
 impl Statement {
@@ -826,6 +941,28 @@ where
         .then_ignore(end())
 }
 
+/// Compiles a ratslang source file.
+///
+/// # Arguments
+///
+/// * `path` - Path to the source file
+/// * `start_line` - Optional starting line number (1-indexed, inclusive)
+/// * `end_line` - Optional ending line number (1-indexed, inclusive)
+///
+/// # Returns
+///
+/// Returns an `Evaluated` result containing the parsed and resolved variables,
+/// or an error if parsing fails.
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// use std::path::PathBuf;
+/// use ratslang::compile_file;
+///
+/// let path = PathBuf::from("config.rl");
+/// let result = compile_file(&path, None, None).unwrap();
+/// ```
 pub fn compile_file(
     path: &std::path::PathBuf,
     start_line: Option<usize>,
@@ -834,6 +971,21 @@ pub fn compile_file(
     compile_file_with_state(path, start_line, end_line, None, std::io::stderr(), true)
 }
 
+/// Compiles a ratslang source file with existing variable state.
+///
+/// # Arguments
+///
+/// * `path` - Path to the source file
+/// * `start_line` - Optional starting line number (1-indexed, inclusive)
+/// * `end_line` - Optional ending line number (1-indexed, inclusive)
+/// * `var_state` - Optional pre-existing variable state to build upon
+/// * `out` - Writer for error output
+/// * `rich_out` - Whether to use rich formatted error output
+///
+/// # Returns
+///
+/// Returns an `Evaluated` result containing the parsed and resolved variables,
+/// or an error if parsing fails.
 pub fn compile_file_with_state(
     path: &std::path::PathBuf,
     start_line: Option<usize>,
@@ -872,9 +1024,11 @@ pub fn compile_file_with_state(
     compile_code_with_state(&selected_lines, dir, var_state, out, rich_out)
 }
 
+/// Tracks the history of variable definitions and provides resolution capabilities.
 #[derive(Debug)]
 pub struct VariableHistory {
     ast: Vec<StatementKindOwned>,
+    /// Cache of resolved variables for faster lookups.
     pub var_cache: HashMap<Var, Rhs>,
 }
 
@@ -923,7 +1077,6 @@ fn truncate_namespace_var(ns: &[String], var: &Var) -> Var {
             name: name.clone(),
             namespace: { remove_prefix_from_target(ns, namespace) },
         },
-        Var::Log => Var::Log,
         Var::Predef { name, namespace } => Var::Predef {
             name: name.clone(),
             namespace: { remove_prefix_from_target(ns, namespace) },
@@ -953,7 +1106,6 @@ fn truncate_namespace_stmt(ns: &[String], stmt: &Statement) -> Statement {
             let l = lhs
                 .iter()
                 .filter(|v| match v {
-                    Var::Log => false,
                     Var::Predef {
                         name: _,
                         namespace: var_ns,
@@ -986,7 +1138,6 @@ fn truncate_namespace(ns: &[String], stmt: &StatementKindOwned) -> StatementKind
 fn stmt_in_ns(namespace: &[String], stmt: &Statement) -> bool {
     match stmt {
         Statement::AssignLeft { lhs, rhs: _ } => lhs.iter().any(|r| match r {
-            Var::Log => false,
             Var::Predef {
                 name: _,
                 namespace: var_ns,
@@ -1000,6 +1151,7 @@ fn stmt_in_ns(namespace: &[String], stmt: &Statement) -> bool {
 }
 
 impl VariableHistory {
+    /// Creates a new variable history from an AST.
     pub fn new(ast: Vec<StatementKindOwned>) -> Self {
         VariableHistory {
             ast,
@@ -1007,11 +1159,13 @@ impl VariableHistory {
         }
     }
 
+    /// Sets the initial variable state, useful for REPL or incremental compilation.
     pub fn with_state(mut self, state: HashMap<Var, Rhs>) -> Self {
         self.var_cache = state;
         self
     }
 
+    /// Populates the variable cache by evaluating all statements in the AST.
     #[allow(unreachable_patterns)] // remove when adding more statments than just variables
     pub fn populate_cache(&mut self) {
         self.ast.iter().for_each(|f| match f {
@@ -1049,7 +1203,6 @@ impl VariableHistory {
             if is_sub_namespace(
                 namespace,
                 match var {
-                    Var::Log => unreachable!(),
                     Var::Predef { name: _, namespace } => namespace,
                     Var::User { name: _, namespace } => namespace,
                 },
@@ -1113,11 +1266,6 @@ impl VariableHistory {
                                                     Var::User { name, namespace: _ } => {
                                                         name.clone()
                                                     }
-                                                    Var::Log => {
-                                                        return Err(anyhow!(
-                                                            "Log can not be assigned."
-                                                        ));
-                                                    }
                                                     Var::Predef { .. } => {
                                                         return Err(anyhow!(
                                                             "Predef variables can not be assigned."
@@ -1141,7 +1289,6 @@ impl VariableHistory {
 
     fn prepend_ns(var: &Var, ns: &[String]) -> Var {
         match var {
-            Var::Log => Var::Log,
             Var::Predef {
                 name,
                 namespace: var_ns,
@@ -1167,6 +1314,15 @@ impl VariableHistory {
         }
     }
 
+    /// Resolves all variables within a specific namespace.
+    ///
+    /// # Arguments
+    ///
+    /// * `namespace` - The namespace path to filter by
+    ///
+    /// # Returns
+    ///
+    /// A vector of tuples containing variables and their resolved values within the namespace.
     pub fn resolve_ns(&self, namespace: &[&str]) -> Vec<(Var, Rhs)> {
         let owned_ns = namespace
             .into_iter()
@@ -1197,6 +1353,11 @@ impl VariableHistory {
             })
     }
 
+    /// Creates a new `VariableHistory` containing only variables from a specific namespace.
+    ///
+    /// # Arguments
+    ///
+    /// * `namespace` - The namespace path to filter by
     pub fn filter_ns(&self, namespace: &[&str]) -> Self {
         let owned_ns = namespace
             .into_iter()
@@ -1206,6 +1367,24 @@ impl VariableHistory {
         Self::new(filtered)
     }
 
+    /// Resolves a variable by name, returning its value.
+    ///
+    /// # Arguments
+    ///
+    /// * `var` - Variable name, optionally with namespace (e.g., "my.namespace.var")
+    ///
+    /// # Returns
+    ///
+    /// Returns `Some(Rhs)` if the variable is found, `None` if not found, or an error if parsing fails.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// # use ratslang::compile_code;
+    /// let code = "my_var = 42";
+    /// let result = compile_code(code).unwrap();
+    /// let value = result.vars.resolve("my_var").unwrap();
+    /// ```
     pub fn resolve(&self, var: &str) -> anyhow::Result<Option<Rhs>> {
         self.resolve_var(&Var::from_str(var)?)
     }
@@ -1231,9 +1410,6 @@ fn resolve_rhs_recursive(
             *rhs = match var_history.resolve_recursive(var, Some(i))? {
                 None => Rhs::Val(Val::StringVal(match var {
                     Var::User { name, namespace: _ } => name.clone(),
-                    Var::Log => {
-                        return Err(anyhow!("Log can not be assigned."));
-                    }
                     Var::Predef {
                         name: _,
                         namespace: _,
@@ -1266,6 +1442,31 @@ fn resolve_stmt(
     Ok(())
 }
 
+/// Compiles ratslang source code from a string.
+///
+/// # Arguments
+///
+/// * `source_code_raw` - The source code to compile
+///
+/// # Returns
+///
+/// Returns an `Evaluated` result containing the parsed and resolved variables,
+/// or an error if parsing fails.
+///
+/// # Examples
+///
+/// ```rust
+/// use ratslang::compile_code;
+///
+/// let code = r#"
+///     distance = 100mm
+///     time = 5s
+///     name = "example"
+/// "#;
+///
+/// let result = compile_code(code).unwrap();
+/// let distance = result.vars.resolve("distance").unwrap();
+/// ```
 pub fn compile_code(source_code_raw: &str) -> anyhow::Result<Evaluated> {
     let currdir = std::env::current_dir()?;
     compile_code_with_state(
@@ -1277,6 +1478,20 @@ pub fn compile_code(source_code_raw: &str) -> anyhow::Result<Evaluated> {
     )
 }
 
+/// Compiles ratslang source code with existing variable state.
+///
+/// # Arguments
+///
+/// * `source_code_raw` - The source code to compile
+/// * `source_code_parent_dir` - Directory path for resolving relative includes
+/// * `var_state` - Optional pre-existing variable state to build upon
+/// * `out` - Writer for error output
+/// * `rich_out` - Whether to use rich formatted error output
+///
+/// # Returns
+///
+/// Returns an `Evaluated` result containing the parsed and resolved variables,
+/// or an error if parsing fails.
 pub fn compile_code_with_state(
     source_code_raw: &str,
     source_code_parent_dir: &std::path::Path,
@@ -1362,21 +1577,54 @@ pub fn compile_code_with_state(
 
 // -- Macros --
 
-/// Gets a length range.
-/// It handles `..` and `100mm..2000mm` syntax, converting all values to meters (f32).
+/// Resolves a length range from millimeters to meters as f32.
+///
+/// Handles various range syntaxes:
+/// - Empty range: `..` returns default bounds
+/// - Bounded range: `100mm..2000mm` converts both to meters
+/// - Partial bounds: `100mm..` or `..2000mm` uses defaults for missing bounds
+///
+/// # Examples
+///
+/// ```rust
+/// use ratslang::{compile_code, resolve_var, resolve_length_range_meters_float, Rhs, Val, NumVal, Unit};
+/// use anyhow::anyhow;
+///
+/// # fn main() -> anyhow::Result<()> {
+/// struct Configs {
+///     user: ratslang::VariableHistory,
+///     defaults: ratslang::VariableHistory,
+/// }
+///
+/// let code = "distance = 1000mm..5000mm";
+/// let ast = compile_code(code)?;
+///
+/// let configs = Configs {
+///     user: ast.vars,
+///     defaults: ratslang::VariableHistory::new(vec![]),
+/// };
+///
+/// let (min, max) = resolve_length_range_meters_float!(configs, "distance", 0.0, 10.0)?;
+/// assert_eq!(min, 1.0);
+/// assert_eq!(max, 5.0);
+/// # Ok(())
+/// # }
+/// ```
 #[macro_export]
 macro_rules! resolve_length_range_meters_float {
     ($ns:expr, $field:expr, $default_from:expr, $default_to:expr) => {{
-        let convert_mm_to_meters = |val: &Val| -> anyhow::Result<f32> {
+        let convert_mm_to_meters = |val: &Val| -> anyhow::Result<f64> {
             match val {
                 Val::UnitedVal(uv) if uv.unit == Unit::WayMillimeter => {
-                    Ok(Length::new::<millimeter>(uv.val as f32).get::<meter>())
+                    Ok((uv.val as f64) / 1000.0)
                 },
-                _ => Err(anyhow!("Expected a united value with 'mm' unit for length range '{}'", $field))
+                _ => Err(anyhow!("Expected a united length value for range '{}'", $field))
             }
         };
 
-        let rhs_val = resolve_var!($ns, $field, as &Rhs, r => {r})?;
+        let rhs_val = resolve_var!($ns, $field, as &Rhs,
+            r @ Rhs::EmptyRange | r @ Rhs::Range { .. } => { r }
+        )?;
         match rhs_val {
             Rhs::EmptyRange => Ok(($default_from, $default_to)),
             Rhs::Range { from, to } => {
@@ -1389,6 +1637,50 @@ macro_rules! resolve_length_range_meters_float {
     }};
 }
 
+/// Resolves a variable from user or default configuration.
+///
+/// This macro attempts to resolve a variable from the user's configuration first,
+/// falling back to defaults if not found. It supports pattern matching on the result
+/// and automatic type conversion.
+///
+/// # Examples
+///
+/// ```rust
+/// use ratslang::{compile_code, resolve_var, Rhs, Val, NumVal};
+/// use anyhow::anyhow;
+///
+/// # fn main() -> anyhow::Result<()> {
+/// // Structure to hold user and default configurations
+/// struct Configs {
+///     user: ratslang::VariableHistory,
+///     defaults: ratslang::VariableHistory,
+/// }
+///
+/// let user_code = "timeout = 5000";
+/// let default_code = "timeout = 3000\nmax_retries = 10";
+///
+/// let user_ast = compile_code(user_code)?;
+/// let default_ast = compile_code(default_code)?;
+///
+/// let configs = Configs {
+///     user: user_ast.vars,
+///     defaults: default_ast.vars,
+/// };
+///
+/// // Resolve timeout (found in user config)
+/// let timeout: i64 = resolve_var!(configs, timeout, as i64,
+///     Rhs::Val(Val::NumVal(NumVal::Integer(i))) => { i }
+/// )?;
+/// assert_eq!(timeout, 5000);
+///
+/// // Resolve max_retries (found in defaults)
+/// let retries: i64 = resolve_var!(configs, max_retries, as i64,
+///     Rhs::Val(Val::NumVal(NumVal::Integer(i))) => { i }
+/// )?;
+/// assert_eq!(retries, 10);
+/// # Ok(())
+/// # }
+/// ```
 #[macro_export]
 macro_rules! resolve_var {
     // Arm for variable names passed as identifiers
@@ -1465,23 +1757,55 @@ macro_rules! resolve_var {
     }};
 }
 
-/// Gets a range from floating numbers while also accepting integers by converting them to floats.
+/// Resolves a numeric range, converting integers to floats if needed.
+///
+/// Handles empty ranges (`..`), bounded ranges, and partial ranges.
+/// Automatically converts integer values to f32.
+///
+/// # Examples
+///
+/// ```rust
+/// use ratslang::{compile_code, resolve_var, resolve_float_force_range, Rhs, Val, NumVal};
+/// use anyhow::anyhow;
+///
+/// # fn main() -> anyhow::Result<()> {
+/// struct Configs {
+///     user: ratslang::VariableHistory,
+///     defaults: ratslang::VariableHistory,
+/// }
+///
+/// let code = "range = 10..100";
+/// let ast = compile_code(code)?;
+///
+/// let configs = Configs {
+///     user: ast.vars,
+///     defaults: ratslang::VariableHistory::new(vec![]),
+/// };
+///
+/// let (min, max) = resolve_float_force_range!(configs, "range", 0.0, 200.0)?;
+/// assert_eq!(min, 10.0);
+/// assert_eq!(max, 100.0);
+/// # Ok(())
+/// # }
+/// ```
 #[macro_export]
 macro_rules! resolve_float_force_range {
     ($ns:expr, $field:expr, $default_from:expr, $default_to:expr) => {{
-        let rhs_val = resolve_var!($ns, $field, as &Rhs, r => {r})?;
+        let rhs_val = resolve_var!($ns, $field, as &Rhs,
+            r @ Rhs::EmptyRange | r @ Rhs::Range { .. } => { r }
+        )?;
         match rhs_val {
             Rhs::EmptyRange => Ok(($default_from, $default_to)),
             Rhs::Range { from, to } => {
                 let from_val = match from {
-                    Some(Val::NumVal(NumVal::Floating(f))) => f as f32,
-                    Some(Val::NumVal(NumVal::Integer(i))) => i as f32,
+                    Some(Val::NumVal(NumVal::Floating(f))) => f as f64,
+                    Some(Val::NumVal(NumVal::Integer(i))) => i as f64,
                     None => $default_from,
                     _ => return Err(anyhow!(format!("Expected numeric value for 'from' in float range '{}'", $field))),
                 };
                 let to_val = match to {
-                    Some(Val::NumVal(NumVal::Floating(f))) => f as f32,
-                    Some(Val::NumVal(NumVal::Integer(i))) => i as f32,
+                    Some(Val::NumVal(NumVal::Floating(f))) => f as f64,
+                    Some(Val::NumVal(NumVal::Integer(i))) => i as f64,
                     None => $default_to,
                     _ => return Err(anyhow!(format!("Expected numeric value for 'to' in float range '{}'", $field))),
                 };
@@ -1492,22 +1816,54 @@ macro_rules! resolve_float_force_range {
     }};
 }
 
-/// Gets a range from floating numbers without implicit conversions.
+/// Resolves a floating-point range without implicit integer conversion.
+///
+/// Unlike `resolve_float_force_range`, this macro requires explicit float values
+/// and will return an error if integers are provided.
+///
+/// # Examples
+///
+/// ```rust
+/// use ratslang::{compile_code, resolve_var, resolve_float_range, Rhs, Val, NumVal};
+/// use anyhow::anyhow;
+///
+/// # fn main() -> anyhow::Result<()> {
+/// struct Configs {
+///     user: ratslang::VariableHistory,
+///     defaults: ratslang::VariableHistory,
+/// }
+///
+/// let code = "ratio = 0.25..0.75";
+/// let ast = compile_code(code)?;
+///
+/// let configs = Configs {
+///     user: ast.vars,
+///     defaults: ratslang::VariableHistory::new(vec![]),
+/// };
+///
+/// let (min, max) = resolve_float_range!(configs, "ratio", 0.0, 1.0)?;
+/// assert_eq!(min, 0.25);
+/// assert_eq!(max, 0.75);
+/// # Ok(())
+/// # }
+/// ```
 #[macro_export]
 macro_rules! resolve_float_range {
     ($ns:expr, $field:expr, $default_from:expr, $default_to:expr) => {{
-        let rhs_val = resolve_var!($ns, $field, as &Rhs, r => {r})?;
+        let rhs_val = resolve_var!($ns, $field, as &Rhs,
+            r @ Rhs::EmptyRange | r @ Rhs::Range { .. } => { r }
+        )?;
         match rhs_val {
             Rhs::EmptyRange => Ok(($default_from, $default_to)),
             Rhs::Range { from, to } => {
                 let from_val = match from {
-                    Some(Val::NumVal(NumVal::Floating(f))) => f as f32,
+                    Some(Val::NumVal(NumVal::Floating(f))) => f as f64,
                     Some(Val::NumVal(NumVal::Integer(_))) => return Err(anyhow!(format!("Expected floating value for 'from' in float range '{}'", $field))),
                     None => $default_from,
                     _ => return Err(anyhow!(format!("Expected numeric value for 'from' in float range '{}'", $field))),
                 };
                 let to_val = match to {
-                    Some(Val::NumVal(NumVal::Floating(f))) => f as f32,
+                    Some(Val::NumVal(NumVal::Floating(f))) => f as f64,
                     Some(Val::NumVal(NumVal::Integer(_))) => return Err(anyhow!(format!("Expected floating value for 'from' in float range '{}'", $field))),
                     None => $default_to,
                     _ => return Err(anyhow!(format!("Expected numeric value for 'to' in float range '{}'", $field))),
@@ -1516,12 +1872,327 @@ macro_rules! resolve_float_range {
             },
             _ => Err(anyhow!(format!("Expected a range expression for field '{}'", $field)))
         }
+    }};
+}
+
+/// Resolves a time range from milliseconds to seconds as f32.
+///
+/// Handles various range syntaxes:
+/// - Empty range: `..` returns default bounds
+/// - Bounded range: `100ms..5s` converts both to seconds
+/// - Partial bounds: `500ms..` or `..10s` uses defaults for missing bounds
+///
+/// # Examples
+///
+/// ```rust
+/// use ratslang::{compile_code, resolve_var, resolve_time_range_seconds_float, Rhs, Val, NumVal, Unit};
+/// use anyhow::anyhow;
+///
+/// # fn main() -> anyhow::Result<()> {
+/// struct Configs {
+///     user: ratslang::VariableHistory,
+///     defaults: ratslang::VariableHistory,
+/// }
+///
+/// let code = "timeout = 1000ms..5s";
+/// let ast = compile_code(code)?;
+///
+/// let configs = Configs {
+///     user: ast.vars,
+///     defaults: ratslang::VariableHistory::new(vec![]),
+/// };
+///
+/// let (min, max) = resolve_time_range_seconds_float!(configs, "timeout", 0.0, 10.0)?;
+/// assert_eq!(min, 1.0);
+/// assert_eq!(max, 5.0);
+/// # Ok(())
+/// # }
+/// ```
+#[macro_export]
+macro_rules! resolve_time_range_seconds_float {
+    ($ns:expr, $field:expr, $default_from:expr, $default_to:expr) => {{
+        let convert_ms_to_seconds = |val: &Val| -> anyhow::Result<f64> {
+            match val {
+                Val::UnitedVal(uv) if uv.unit == Unit::TimeMilliseconds => {
+                    Ok((uv.val as f64) / 1000.0)
+                },
+                _ => Err(anyhow!("Expected a united time value for range '{}'", $field))
+            }
+        };
+
+        let rhs_val = resolve_var!($ns, $field, as &Rhs,
+            r @ Rhs::EmptyRange | r @ Rhs::Range { .. } => { r }
+        )?;
+        match rhs_val {
+            Rhs::EmptyRange => Ok(($default_from, $default_to)),
+            Rhs::Range { from, to } => {
+                let from_val = from.as_ref().map_or(Ok($default_from), |v| convert_ms_to_seconds(v))?;
+                let to_val = to.as_ref().map_or(Ok($default_to), |v| convert_ms_to_seconds(v))?;
+                Ok((from_val, to_val))
+            }
+            _ => Err(anyhow!("Expected a range expression for field '{}'", $field))
+        }
+    }};
+}
+
+/// Resolves an integer range without type conversion.
+///
+/// Handles empty ranges (`..`), bounded ranges, and partial ranges.
+/// Only accepts integer values, no automatic conversion.
+///
+/// # Examples
+///
+/// ```rust
+/// use ratslang::{compile_code, resolve_var, resolve_int_range, Rhs, Val, NumVal};
+/// use anyhow::anyhow;
+///
+/// # fn main() -> anyhow::Result<()> {
+/// struct Configs {
+///     user: ratslang::VariableHistory,
+///     defaults: ratslang::VariableHistory,
+/// }
+///
+/// let code = "count = 10..100";
+/// let ast = compile_code(code)?;
+///
+/// let configs = Configs {
+///     user: ast.vars,
+///     defaults: ratslang::VariableHistory::new(vec![]),
+/// };
+///
+/// let (min, max) = resolve_int_range!(configs, "count", 0, 200)?;
+/// assert_eq!(min, 10);
+/// assert_eq!(max, 100);
+/// # Ok(())
+/// # }
+/// ```
+#[macro_export]
+macro_rules! resolve_int_range {
+    ($ns:expr, $field:expr, $default_from:expr, $default_to:expr) => {{
+        let rhs_val = resolve_var!($ns, $field, as &Rhs,
+            r @ Rhs::EmptyRange | r @ Rhs::Range { .. } => { r }
+        )?;
+        match rhs_val {
+            Rhs::EmptyRange => Ok(($default_from, $default_to)),
+            Rhs::Range { from, to } => {
+                let from_val = match from {
+                    Some(Val::NumVal(NumVal::Integer(i))) => i,
+                    None => $default_from,
+                    _ => return Err(anyhow!(format!("Expected integer value for 'from' in integer range '{}'", $field))),
+                };
+                let to_val = match to {
+                    Some(Val::NumVal(NumVal::Integer(i))) => i,
+                    None => $default_to,
+                    _ => return Err(anyhow!(format!("Expected integer value for 'to' in integer range '{}'", $field))),
+                };
+                Ok((from_val, to_val))
+            },
+            _ => Err(anyhow!(format!("Expected a range expression for field '{}'", $field)))
+        }
+    }};
+}
+
+/// Resolves a string value from user or default configuration.
+///
+/// # Examples
+///
+/// ```rust
+/// use ratslang::{compile_code, resolve_string, resolve_var, Rhs, Val};
+/// use anyhow::anyhow;
+///
+/// # fn main() -> anyhow::Result<()> {
+/// struct Configs {
+///     user: ratslang::VariableHistory,
+///     defaults: ratslang::VariableHistory,
+/// }
+///
+/// let code = "name = \"example\"";
+/// let ast = compile_code(code)?;
+///
+/// let configs = Configs {
+///     user: ast.vars,
+///     defaults: ratslang::VariableHistory::new(vec![]),
+/// };
+///
+/// let name: String = resolve_string!(configs, "name")?;
+/// assert_eq!(name, "example");
+/// # Ok(())
+/// # }
+/// ```
+#[macro_export]
+macro_rules! resolve_string {
+    ($ns:expr, $field:expr) => {{
+        resolve_var!($ns, $field, as String,
+            Rhs::Val(Val::StringVal(s)) => { s.clone() }
+        )
+    }};
+}
+
+/// Resolves a boolean value from user or default configuration.
+///
+/// # Examples
+///
+/// ```rust
+/// use ratslang::{compile_code, resolve_bool, resolve_var, Rhs, Val};
+/// use anyhow::anyhow;
+///
+/// # fn main() -> anyhow::Result<()> {
+/// struct Configs {
+///     user: ratslang::VariableHistory,
+///     defaults: ratslang::VariableHistory,
+/// }
+///
+/// let code = "enabled = true";
+/// let ast = compile_code(code)?;
+///
+/// let configs = Configs {
+///     user: ast.vars,
+///     defaults: ratslang::VariableHistory::new(vec![]),
+/// };
+///
+/// let enabled: bool = resolve_bool!(configs, "enabled")?;
+/// assert_eq!(enabled, true);
+/// # Ok(())
+/// # }
+/// ```
+#[macro_export]
+macro_rules! resolve_bool {
+    ($ns:expr, $field:expr) => {{
+        resolve_var!($ns, $field, as bool,
+            Rhs::Val(Val::BoolVal(b)) => { b }
+        )
+    }};
+}
+
+/// Resolves an integer value from user or default configuration.
+///
+/// # Examples
+///
+/// ```rust
+/// use ratslang::{compile_code, resolve_int, resolve_var, Rhs, Val, NumVal};
+/// use anyhow::anyhow;
+///
+/// # fn main() -> anyhow::Result<()> {
+/// struct Configs {
+///     user: ratslang::VariableHistory,
+///     defaults: ratslang::VariableHistory,
+/// }
+///
+/// let code = "count = 42";
+/// let ast = compile_code(code)?;
+///
+/// let configs = Configs {
+///     user: ast.vars,
+///     defaults: ratslang::VariableHistory::new(vec![]),
+/// };
+///
+/// let count: i64 = resolve_int!(configs, "count")?;
+/// assert_eq!(count, 42);
+/// # Ok(())
+/// # }
+/// ```
+#[macro_export]
+macro_rules! resolve_int {
+    ($ns:expr, $field:expr) => {{
+        resolve_var!($ns, $field, as i64,
+            Rhs::Val(Val::NumVal(NumVal::Integer(i))) => { i }
+        )
+    }};
+}
+
+/// Resolves a floating-point value from user or default configuration.
+///
+/// Accepts both float and integer values, converting integers to floats.
+///
+/// # Examples
+///
+/// ```rust
+/// use ratslang::{compile_code, resolve_float};
+/// use anyhow::anyhow;
+///
+/// # fn main() -> anyhow::Result<()> {
+/// struct Configs {
+///     user: ratslang::VariableHistory,
+///     defaults: ratslang::VariableHistory,
+/// }
+///
+/// let code = "ratio = 3.14";
+/// let ast = compile_code(code)?;
+///
+/// let configs = Configs {
+///     user: ast.vars,
+///     defaults: ratslang::VariableHistory::new(vec![]),
+/// };
+///
+/// let ratio: f64 = resolve_float!(configs, "ratio")?;
+/// assert_eq!(ratio, 3.14);
+/// # Ok(())
+/// # }
+/// ```
+#[macro_export]
+macro_rules! resolve_float {
+    ($ns:expr, $field:expr) => {{
+        use $crate::{Rhs, Val, NumVal};
+        let __var_name_str = $field;
+        let __resolved_opt = match $ns.user.resolve(__var_name_str)? {
+            Some(val) => Some(val),
+            None => $ns.defaults.resolve(__var_name_str)?,
+        };
+
+        match __resolved_opt {
+            Some(Rhs::Val(Val::NumVal(NumVal::Floating(f)))) => Ok(f),
+            Some(Rhs::Val(Val::NumVal(NumVal::Integer(i)))) => Ok(i as f64),
+            Some(_) => Err(anyhow!(format!("Pattern mismatch for '{}'. Expected numeric value.", __var_name_str))),
+            None => Err(anyhow!(format!("Required variable '{}' not found in any configuration.", __var_name_str))),
+        }
+    }};
+}
+
+/// Resolves a path value from user or default configuration.
+///
+/// # Examples
+///
+/// ```rust
+/// use ratslang::{compile_code, resolve_path, resolve_var, Rhs};
+/// use anyhow::anyhow;
+///
+/// # fn main() -> anyhow::Result<()> {
+/// struct Configs {
+///     user: ratslang::VariableHistory,
+///     defaults: ratslang::VariableHistory,
+/// }
+///
+/// let code = "_file = /path/to/file";
+/// let ast = compile_code(code)?;
+///
+/// let configs = Configs {
+///     user: ast.vars,
+///     defaults: ratslang::VariableHistory::new(vec![]),
+/// };
+///
+/// let path: String = resolve_path!(configs, "_file")?;
+/// assert_eq!(path, "/path/to/file");
+/// # Ok(())
+/// # }
+/// ```
+#[macro_export]
+macro_rules! resolve_path {
+    ($ns:expr, $field:expr) => {{
+        resolve_var!($ns, $field, as String,
+            Rhs::Path(p) => { p.clone() }
+        )
     }};
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Local configs helper for tests
+    struct Configs {
+        user: VariableHistory,
+        defaults: VariableHistory,
+    }
 
     #[test]
     fn empty() {
@@ -1975,6 +2646,74 @@ mat = [ [ 6, 1, 9 ],
     //     }
 
     //     #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+
+    #[test]
+    fn error_int_range_with_float_values() {
+        let code = "count = 1.5..2.5";
+        let ast = compile_code(code).unwrap();
+        let configs = Configs { user: ast.vars, defaults: VariableHistory::new(vec![]) };
+        let res = (|| -> anyhow::Result<(i64,i64)> { resolve_int_range!(configs, "count", 0, 10) })();
+        assert!(res.is_err());
+        let msg = format!("{}", res.err().unwrap());
+        assert!(msg.contains("Expected integer value for 'from'"));
+    }
+
+    #[test]
+    fn error_float_range_with_integer_values() {
+        let code = "ratio = 1..2";
+        let ast = compile_code(code).unwrap();
+        let configs = Configs { user: ast.vars, defaults: VariableHistory::new(vec![]) };
+        let res = (|| -> anyhow::Result<(f64,f64)> { resolve_float_range!(configs, "ratio", 0.0, 10.0) })();
+        assert!(res.is_err());
+        let msg = format!("{}", res.err().unwrap());
+        assert!(msg.contains("Expected floating value for 'from'"));
+    }
+
+    #[test]
+    fn error_string_with_bool() {
+        let code = "name = true";
+        let ast = compile_code(code).unwrap();
+        let configs = Configs { user: ast.vars, defaults: VariableHistory::new(vec![]) };
+        let res: anyhow::Result<String> = (|| -> anyhow::Result<String> { resolve_string!(configs, "name") })();
+        assert!(res.is_err());
+        let msg = format!("{}", res.err().unwrap());
+        assert!(msg.contains("Pattern mismatch"));
+    }
+
+    #[test]
+    fn error_path_with_string_val() {
+        let code = "_file = \"/path/to/file\""; // StringVal, not Path
+        let ast = compile_code(code).unwrap();
+        let configs = Configs { user: ast.vars, defaults: VariableHistory::new(vec![]) };
+        let res: anyhow::Result<String> = (|| -> anyhow::Result<String> { resolve_path!(configs, "_file") })();
+        assert!(res.is_err());
+        let msg = format!("{}", res.err().unwrap());
+        assert!(msg.contains("Pattern mismatch"));
+    }
+
+    #[test]
+    fn error_length_range_wrong_unit() {
+        // Provide a united value with incorrect unit (e.g., milliseconds)
+        let code = "distance = 1000ms..2000ms";
+        let ast = compile_code(code).unwrap();
+        let configs = Configs { user: ast.vars, defaults: VariableHistory::new(vec![]) };
+        let res = (|| -> anyhow::Result<(f64,f64)> { resolve_length_range_meters_float!(configs, "distance", 0.5, 10.0) })();
+        assert!(res.is_err());
+        let msg = format!("{}", res.err().unwrap());
+        assert!(msg.contains("Expected a united length value"));
+    }
+
+    #[test]
+    fn error_time_range_non_time_unit() {
+        // Provide a united value with wrong unit (e.g., millimeter)
+        let code = "timeout = 1000mm..2000mm";
+        let ast = compile_code(code).unwrap();
+        let configs = Configs { user: ast.vars, defaults: VariableHistory::new(vec![]) };
+        let res = (|| -> anyhow::Result<(f64,f64)> { resolve_time_range_seconds_float!(configs, "timeout", 0.0, 10.0) })();
+        assert!(res.is_err());
+        let msg = format!("{}", res.err().unwrap());
+        assert!(msg.contains("Expected a united time value"));
+    }
     //     enum Sensor {
     //         Lidar(Lidar),
     //         Imu,
@@ -2029,5 +2768,447 @@ mat = [ [ 6, 1, 9 ],
                 ])),
             ])
         );
+    }
+
+    #[test]
+    fn macro_resolve_length_range_meters_float_defaults() -> anyhow::Result<()> {
+        struct Configs {
+            user: VariableHistory,
+            defaults: VariableHistory,
+        }
+
+        // Test with empty range
+        let code_empty = "distance = ..";
+        let ast = compile_code(code_empty)?;
+        let configs = Configs {
+            user: ast.vars,
+            defaults: VariableHistory::new(vec![]),
+        };
+
+        let (min, max) = resolve_length_range_meters_float!(configs, "distance", 0.5, 10.0)?;
+        assert_eq!(min, 0.5);
+        assert_eq!(max, 10.0);
+
+        // Test with partial lower bound
+        let code_lower = "distance = 2000mm..";
+        let ast = compile_code(code_lower)?;
+        let configs = Configs {
+            user: ast.vars,
+            defaults: VariableHistory::new(vec![]),
+        };
+
+        let (min, max) = resolve_length_range_meters_float!(configs, "distance", 0.0, 15.0)?;
+        assert_eq!(min, 2.0);
+        assert_eq!(max, 15.0);
+
+        // Test with partial upper bound
+        let code_upper = "distance = ..8000mm";
+        let ast = compile_code(code_upper)?;
+        let configs = Configs {
+            user: ast.vars,
+            defaults: VariableHistory::new(vec![]),
+        };
+
+        let (min, max) = resolve_length_range_meters_float!(configs, "distance", 1.0, 20.0)?;
+        assert_eq!(min, 1.0);
+        assert_eq!(max, 8.0);
+
+        Ok(())
+    }
+
+    #[test]
+    fn macro_resolve_float_force_range_defaults() -> anyhow::Result<()> {
+        struct Configs {
+            user: VariableHistory,
+            defaults: VariableHistory,
+        }
+
+        // Test with empty range
+        let code_empty = "range = ..";
+        let ast = compile_code(code_empty)?;
+        let configs = Configs {
+            user: ast.vars,
+            defaults: VariableHistory::new(vec![]),
+        };
+
+        let (min, max) = resolve_float_force_range!(configs, "range", -5.0, 100.0)?;
+        assert_eq!(min, -5.0);
+        assert_eq!(max, 100.0);
+
+        // Test with partial lower bound
+        let code_lower = "range = 25..";
+        let ast = compile_code(code_lower)?;
+        let configs = Configs {
+            user: ast.vars,
+            defaults: VariableHistory::new(vec![]),
+        };
+
+        let (min, max) = resolve_float_force_range!(configs, "range", 0.0, 200.0)?;
+        assert_eq!(min, 25.0);
+        assert_eq!(max, 200.0);
+
+        // Test with partial upper bound
+        let code_upper = "range = ..75";
+        let ast = compile_code(code_upper)?;
+        let configs = Configs {
+            user: ast.vars,
+            defaults: VariableHistory::new(vec![]),
+        };
+
+        let (min, max) = resolve_float_force_range!(configs, "range", 10.0, 150.0)?;
+        assert_eq!(min, 10.0);
+        assert_eq!(max, 75.0);
+
+        Ok(())
+    }
+
+    #[test]
+    fn macro_resolve_float_range_defaults() -> anyhow::Result<()> {
+        struct Configs {
+            user: VariableHistory,
+            defaults: VariableHistory,
+        }
+
+        // Test with empty range
+        let code_empty = "ratio = ..";
+        let ast = compile_code(code_empty)?;
+        let configs = Configs {
+            user: ast.vars,
+            defaults: VariableHistory::new(vec![]),
+        };
+
+        let (min, max) = resolve_float_range!(configs, "ratio", 0.0, 1.0)?;
+        assert_eq!(min, 0.0);
+        assert_eq!(max, 1.0);
+
+        // Test with partial lower bound
+        let code_lower = "ratio = 0.1..";
+        let ast = compile_code(code_lower)?;
+        let configs = Configs {
+            user: ast.vars,
+            defaults: VariableHistory::new(vec![]),
+        };
+
+        let (min, max) = resolve_float_range!(configs, "ratio", 0.0, 1.0)?;
+        assert_eq!(min, 0.1);
+        assert_eq!(max, 1.0);
+
+        // Test with partial upper bound
+        let code_upper = "ratio = ..0.9";
+        let ast = compile_code(code_upper)?;
+        let configs = Configs {
+            user: ast.vars,
+            defaults: VariableHistory::new(vec![]),
+        };
+
+        let (min, max) = resolve_float_range!(configs, "ratio", 0.0, 1.0)?;
+        assert_eq!(min, 0.0);
+        assert_eq!(max, 0.9);
+
+        Ok(())
+    }
+
+    #[test]
+    fn macro_resolve_time_range_seconds_float_defaults() -> anyhow::Result<()> {
+        struct Configs {
+            user: VariableHistory,
+            defaults: VariableHistory,
+        }
+
+        // Test with empty range
+        let code_empty = "timeout = ..";
+        let ast = compile_code(code_empty)?;
+        let configs = Configs {
+            user: ast.vars,
+            defaults: VariableHistory::new(vec![]),
+        };
+
+        let (min, max) = resolve_time_range_seconds_float!(configs, "timeout", 0.5, 10.0)?;
+        assert_eq!(min, 0.5);
+        assert_eq!(max, 10.0);
+
+        // Test with bounded range
+        let code_bounded = "timeout = 1000ms..5s";
+        let ast = compile_code(code_bounded)?;
+        let configs = Configs {
+            user: ast.vars,
+            defaults: VariableHistory::new(vec![]),
+        };
+
+        let (min, max) = resolve_time_range_seconds_float!(configs, "timeout", 0.0, 10.0)?;
+        assert_eq!(min, 1.0);
+        assert_eq!(max, 5.0);
+
+        // Test with partial lower bound
+        let code_lower = "timeout = 2s..";
+        let ast = compile_code(code_lower)?;
+        let configs = Configs {
+            user: ast.vars,
+            defaults: VariableHistory::new(vec![]),
+        };
+
+        let (min, max) = resolve_time_range_seconds_float!(configs, "timeout", 0.0, 15.0)?;
+        assert_eq!(min, 2.0);
+        assert_eq!(max, 15.0);
+
+        Ok(())
+    }
+
+    #[test]
+    fn macro_resolve_int_range_defaults() -> anyhow::Result<()> {
+        struct Configs {
+            user: VariableHistory,
+            defaults: VariableHistory,
+        }
+
+        // Test with empty range
+        let code_empty = "count = ..";
+        let ast = compile_code(code_empty)?;
+        let configs = Configs {
+            user: ast.vars,
+            defaults: VariableHistory::new(vec![]),
+        };
+
+        let (min, max) = resolve_int_range!(configs, "count", 0, 100)?;
+        assert_eq!(min, 0);
+        assert_eq!(max, 100);
+
+        // Test with bounded range
+        let code_bounded = "count = 10..50";
+        let ast = compile_code(code_bounded)?;
+        let configs = Configs {
+            user: ast.vars,
+            defaults: VariableHistory::new(vec![]),
+        };
+
+        let (min, max) = resolve_int_range!(configs, "count", 0, 100)?;
+        assert_eq!(min, 10);
+        assert_eq!(max, 50);
+
+        // Test with partial lower bound
+        let code_lower = "count = 25..";
+        let ast = compile_code(code_lower)?;
+        let configs = Configs {
+            user: ast.vars,
+            defaults: VariableHistory::new(vec![]),
+        };
+
+        let (min, max) = resolve_int_range!(configs, "count", 0, 200)?;
+        assert_eq!(min, 25);
+        assert_eq!(max, 200);
+
+        Ok(())
+    }
+
+    #[test]
+    fn macro_resolve_string() -> anyhow::Result<()> {
+        struct Configs {
+            user: VariableHistory,
+            defaults: VariableHistory,
+        }
+
+        // Test with explicit string
+        let code = "name = \"example\"";
+        let ast = compile_code(code)?;
+        let configs = Configs {
+            user: ast.vars,
+            defaults: VariableHistory::new(vec![]),
+        };
+
+        let name: String = resolve_string!(configs, "name")?;
+        assert_eq!(name, "example");
+
+        // Test with implicit string (identifier)
+        let code_implicit = "type = Lidar";
+        let ast = compile_code(code_implicit)?;
+        let configs = Configs {
+            user: ast.vars,
+            defaults: VariableHistory::new(vec![]),
+        };
+
+        let type_name: String = resolve_string!(configs, "type")?;
+        assert_eq!(type_name, "Lidar");
+
+        Ok(())
+    }
+
+    #[test]
+    fn macro_resolve_bool() -> anyhow::Result<()> {
+        struct Configs {
+            user: VariableHistory,
+            defaults: VariableHistory,
+        }
+
+        // Test with true
+        let code_true = "enabled = true";
+        let ast = compile_code(code_true)?;
+        let configs = Configs {
+            user: ast.vars,
+            defaults: VariableHistory::new(vec![]),
+        };
+
+        let enabled: bool = resolve_bool!(configs, "enabled")?;
+        assert_eq!(enabled, true);
+
+        // Test with false
+        let code_false = "disabled = false";
+        let ast = compile_code(code_false)?;
+        let configs = Configs {
+            user: ast.vars,
+            defaults: VariableHistory::new(vec![]),
+        };
+
+        let disabled: bool = resolve_bool!(configs, "disabled")?;
+        assert_eq!(disabled, false);
+
+        Ok(())
+    }
+
+    #[test]
+    fn macro_resolve_int() -> anyhow::Result<()> {
+        struct Configs {
+            user: VariableHistory,
+            defaults: VariableHistory,
+        }
+
+        // Test with positive integer
+        let code_pos = "count = 42";
+        let ast = compile_code(code_pos)?;
+        let configs = Configs {
+            user: ast.vars,
+            defaults: VariableHistory::new(vec![]),
+        };
+
+        let count: i64 = resolve_int!(configs, "count")?;
+        assert_eq!(count, 42);
+
+        // Test with negative integer
+        let code_neg = "offset = -10";
+        let ast = compile_code(code_neg)?;
+        let configs = Configs {
+            user: ast.vars,
+            defaults: VariableHistory::new(vec![]),
+        };
+
+        let offset: i64 = resolve_int!(configs, "offset")?;
+        assert_eq!(offset, -10);
+
+        Ok(())
+    }
+
+    #[test]
+    fn macro_resolve_float() -> anyhow::Result<()> {
+        struct Configs {
+            user: VariableHistory,
+            defaults: VariableHistory,
+        }
+
+        // Test with explicit float
+        let code_float = "ratio = 3.14";
+        let ast = compile_code(code_float)?;
+        let configs = Configs {
+            user: ast.vars,
+            defaults: VariableHistory::new(vec![]),
+        };
+
+        let ratio: f64 = resolve_float!(configs, "ratio")?;
+        assert_eq!(ratio, 3.14);
+
+        // Test with integer that gets converted to float
+        let code_int = "count = 42";
+        let ast = compile_code(code_int)?;
+        let configs = Configs {
+            user: ast.vars,
+            defaults: VariableHistory::new(vec![]),
+        };
+
+        let count: f64 = resolve_float!(configs, "count")?;
+        assert_eq!(count, 42.0);
+
+        Ok(())
+    }
+
+    #[test]
+    fn macro_resolve_path() -> anyhow::Result<()> {
+        struct Configs {
+            user: VariableHistory,
+            defaults: VariableHistory,
+        }
+
+        // Test with absolute path
+        let code = "_file = /path/to/file";
+        let ast = compile_code(code)?;
+        let configs = Configs {
+            user: ast.vars,
+            defaults: VariableHistory::new(vec![]),
+        };
+
+        let path: String = resolve_path!(configs, "_file")?;
+        assert_eq!(path, "/path/to/file");
+
+        // Test with relative path
+        let code_rel = "_config = ./config.toml";
+        let ast = compile_code(code_rel)?;
+        let configs = Configs {
+            user: ast.vars,
+            defaults: VariableHistory::new(vec![]),
+        };
+
+        let config_path: String = resolve_path!(configs, "_config")?;
+        assert_eq!(config_path, "./config.toml");
+
+        Ok(())
+    }
+
+    #[test]
+    fn macro_fallback_to_defaults() -> anyhow::Result<()> {
+        struct Configs {
+            user: VariableHistory,
+            defaults: VariableHistory,
+        }
+
+        // Test that macros fall back to defaults when not in user config
+        let user_code = "enabled = true";
+        let default_code = "count = 100\nname = \"default\"";
+
+        let user_ast = compile_code(user_code)?;
+        let default_ast = compile_code(default_code)?;
+
+        let configs = Configs {
+            user: user_ast.vars,
+            defaults: default_ast.vars,
+        };
+
+        // This should come from user config
+        let enabled: bool = resolve_bool!(configs, "enabled")?;
+        assert_eq!(enabled, true);
+
+        // These should come from default config
+        let count: i64 = resolve_int!(configs, "count")?;
+        assert_eq!(count, 100);
+
+        let name: String = resolve_string!(configs, "name")?;
+        assert_eq!(name, "default");
+
+        Ok(())
+    }
+
+    #[test]
+    fn error_variable_not_found_message() {
+        // No variables defined; attempt to resolve a missing one
+        let ast = compile_code("").unwrap();
+        let defaults = VariableHistory::new(vec![]);
+        let configs = Configs { user: ast.vars, defaults };
+
+        // Use identifier form to validate the exact error message path
+        let res: anyhow::Result<i64> = (|| -> anyhow::Result<i64> {
+            resolve_var!(configs, missing_var, as i64,
+                Rhs::Val(Val::NumVal(NumVal::Integer(i))) => { i }
+            )
+        })();
+
+        assert!(res.is_err());
+        let msg = format!("{}", res.err().unwrap());
+        assert!(msg.contains("Required variable 'missing_var' not found in any configuration."));
     }
 }

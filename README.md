@@ -1,11 +1,11 @@
-# Ratslang
+<p align="center">
+  <h3 align="center">Ratslang</h3>
+  <p align="center">A compact configuration language for physical systems.</p>
+  <p align="center"><a href="https://crates.io/crates/ratslang"><img src="https://img.shields.io/crates/v/ratslang.svg" alt=""></a> <a href="https://github.com/stelzo/ratslang/tree/main/tests"><img src="https://github.com/stelzo/ratslang/actions/workflows/tests.yml/badge.svg" alt=""></a>
+  </p>
+</p>
 
-*More a slang, less a lang.*
-
-> [!WARNING]
-> The language is currently in active development and is not ready for production use. Updates *will* break your code or `.rl` files. Use at your own risk.
-
-Ratslang is a compact **configuration language**, delivered as a Rust library.
+Ratslang is a compact **configuration language**, delivered as a [Rust library](https://crates.io/crates/ratslang).
 
 It was born out of frustration with the lack of proper types for **time** and **length** in configuration files. When we configure physical systems like robots, even a single zero more or less can have massive consequences. Sometimes, we don't even realize there's a problem until it's too late. The famous [Loss of the Mars Climate Orbiter](https://en.wikipedia.org/wiki/Mars_Climate_Orbiter) is a prime example of this issue.
 
@@ -104,47 +104,95 @@ Add this to your `Cargo.toml`.
 ratslang = { version = "0.1.0-alpha.3", git = "https://github.com/stelzo/ratslang", branch = "main" }
 ~~~
 
-First, you compile a Ratslang file to get a cleaned **Abstract Syntax Tree (AST)** with all variables resolved.
+First, you compile a Ratslang file to get a cleaned Abstract Syntax Tree (AST) with all variables resolved.
 
 ~~~rust
 let file = std::path::Path::new("./your_file.rl");
 let ast = ratslang::compile_file(&file.to_path_buf(), None, None).unwrap();
 ~~~
 
-Then, you can safely read the variables you need using Rust's powerful pattern matching.
+Then, you can safely read the variables you need — either with the provided helper macros for concise code, or manually using Rust's powerful pattern matching.
+
+Using helper macros (recommended):
 
 ~~~rust
-// "Just get the variable" with macro and direct conversion
-let k_neighbors = resolve_var!(ast, "k_neighborhood", as usize, Rhs::Val(Val::NumVal(NumVal::Integer(i))) => {i})?;
+use ratslang::{
+    compile_file,
+    resolve_string, resolve_bool, resolve_int, resolve_float,
+    resolve_int_range, resolve_length_range_meters_float, resolve_time_range_seconds_float,
+    resolve_path,
+};
 
-// ... without macro, using AST types
-let avar = ast.vars.resolve("password").unwrap();
-let avar = ast.vars.resolve("_my_namespace._some_var").unwrap();
-assert_eq!(avar, Some(ratslang::Rhs::Val(ratslang::Val::StringVal(":)".to_owned()))));
+// Local configs combining user vars and optional defaults
+struct Configs {
+    user: ratslang::VariableHistory,
+    defaults: ratslang::VariableHistory,
+}
 
-// Or truncate and filter namespaces first
+let file = std::path::Path::new("./your_file.rl");
+let ast = compile_file(&file.to_path_buf(), None, None).unwrap();
+let configs = Configs { user: ast.vars, defaults: ratslang::VariableHistory::new(vec![]) };
+
+// Simple values
+let name: String = resolve_string!(configs, "name")?;
+let enabled: bool = resolve_bool!(configs, "variable")?;
+let k: i64 = resolve_int!(configs, "k_neighbors")?;
+let ratio: f64 = resolve_float!(configs, "something_else")?;
+
+// Paths
+let path: String = resolve_path!(configs, "_file")?; // e.g., `_file = /abs/or/relative`
+
+// Ranges (with sensible defaults used when bounds are missing)
+let (d_min, d_max) = resolve_length_range_meters_float!(configs, "len", 0.0, 10.0)?; // meters as f64
+let (t_min, t_max) = resolve_time_range_seconds_float!(configs, "time_is_running", 0.0, 60.0)?; // seconds as f64
+let (i_min, i_max) = resolve_int_range!(configs, "my.super.long.prefix.var", 0, 100)?;
+~~~
+
+Manual resolution:
+
+~~~rust
+use anyhow::anyhow;
+use ratslang::{compile_file, Rhs, Val, NumVal};
+
+// Local configs combining user vars and optional defaults
+struct Configs {
+    user: ratslang::VariableHistory,
+    defaults: ratslang::VariableHistory,
+}
+
+let file = std::path::Path::new("./your_file.rl");
+let ast = compile_file(&file.to_path_buf(), None, None).unwrap();
 let vars = ast.vars.filter_ns(&["_my_namespace"]);
 
-// Match and handle unexpected types
-let namespace = vars
-      .resolve("_some_var")?
-      .map_or(Ok("a_default_value".to_owned()), |rhs| {
-          Ok(match rhs {
-              ratslang::Rhs::String(sval) => sval,
-              _ => {
-                  return Err(anyhow!("Unexpected type for _my_namespace._some_var, expected String."));
-              }
-          })
-      })?;
+// Resolve a variable and pattern-match its type manually
+let value = vars
+    .resolve("_some_var")?
+    .map_or(Ok("a_default_value".to_owned()), |rhs| {
+        Ok(match rhs {
+            Rhs::Val(Val::StringVal(s)) => s,
+            _ => {
+                return Err(anyhow!(
+                    "Unexpected type for _my_namespace._some_var, expected String."
+                ));
+            }
+        })
+    })?;
+
+// Or use the generic resolve_var! macro
+use ratslang::resolve_var;
+let configs = Configs { user: vars, defaults: ratslang::VariableHistory::new(vec![]) };
+let k_neighbors: usize = resolve_var!(configs, k_neighborhood, as usize,
+    Rhs::Val(Val::NumVal(NumVal::Integer(i))) => { i }
+)?;
 ~~~
 
 ---
 
-## Extras
-
 * Ratslang files typically use the `.rl` extension.
-* Awk syntax highlighting provides a decent visual experience for Ratslang code.
+* Syntax highlighting is available with [this tree-sitter grammar](https://github.com/stelzo/tree-sitter-ratslang) or this [VS Code extension](https://marketplace.visualstudio.com/items?itemName=stelzo.ratslang). For Markdown files, you can use the `awk` language for syntax highlighting. It is not perfect but works reasonably well.
 * Compile errors are beautifully rendered thanks to [Ariadne](https://crates.io/crates/ariadne) ❤️.
+
+*Ratslang: More a slang, less a lang.*
 
 ---
 
@@ -154,8 +202,6 @@ The following features and improvements are planned:
 
 * **Expanded Units and Scales**: Integrate more diverse units and scales with centralized conversion, ranging from astronomy to quantum physics, powered by the `uom` crate.
 * **Opt-in Language Versioning**: Implement an opt-in versioning system for `.rl` files.
-* **Stable AST Type Names**: Stable types for the AST and for the compiler.
-* **crates.io Release**: A `crates.io` release will follow once all the above points are completed and the design has been proven itself in my own projects.
 
 ---
 

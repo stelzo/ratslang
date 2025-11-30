@@ -1,15 +1,28 @@
 [package]
 name = "ratslang"
-version = "0.1.0-alpha.4"
-keywords = ["config", "lang", "parser", "robotics"]
-license = "MIT OR Apache-2.0"
-repository = "https://github.com/stelzo/ratslang/"
+version = "0.1.0"
 edition = "2024"
-include = ["**/*.rs", "**/*.md", "**/Cargo.toml"]
+authors = ["Christopher Sieh <stelzo@steado.de>"]
+description = "Simple configuration language for working with physical systems."
+repository = "https://github.com/stelzo/ratslang/"
+license = "MIT OR Apache-2.0"
+keywords = ["config", "lang", "parser", "robotics"]
+categories = [
+  "science::robotics",
+  "parser-implementations",
+]
+readme = "README.md"
+documentation = "https://docs.rs/ratslang"
+homepage = "https://github.com/stelzo/ratslang"
+exclude = [
+  ".cargo_vcs_info.json",
+  ".github/*",
+  "vscode/*",
+]
 
 [dependencies]
-log = "0.4.25"
-logos = "0.15.0"
-chumsky = "0.10.0"
+log = "0.4.28"
+logos = "0.15.1"
+chumsky = "0.11.2"
 ariadne = "0.4"
 anyhow = "1"
