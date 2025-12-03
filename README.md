@@ -14,6 +14,7 @@ The core motivations behind Ratslang are:
 * **Solving units:** The language should inherently handle units when configuring physical systems.
 * **Combining configs:** It should be easier to combine existing configuration files rather than copying them.
 * **Simple and extensible:** The implementation should be small, simple, and easy to extend.
+* **Type-safe units:** Physical values are stored using the [`uom`](https://crates.io/crates/uom) crate with full precision - no rounding.
 
 Let's take a look at how it works:
 
@@ -23,6 +24,9 @@ variable = true
 
 time = 1s
 time_is_running = 1ms..2mins # ranges convert automatically
+
+# nanometers and micrometers for precision work
+precision_length = 500nm..10um
 
 len = 1cm..1m
 
@@ -66,15 +70,19 @@ Currently, Ratslang doesn't support expressions like arithmetic, loops, or condi
 * **String**: Quotes can be omitted if the string doesn't conflict with a previously defined variable. Example: `"my string"`, `another_string_without_quotes`
 * **Path**: Example: `./somewhere/relative.dat`, `/or/absolute`, `./../backneed/dotfirst.launch.py`
 * **Array/Matrix**: Newlines after commas are also supported for readability. `[ <Type>, <Type>, ... ]`, `[ 42, World, [ "nested" ] ]`, `[ [ 1, 2, 3 ], [ 4, 5, 6 ] ]`
-* **Time**:
+* **Time** (stored as `uom::si::f64::Time`):
     * **Hour**: `hour`, `hours` (`s` is optional). Example: `2hours`, `1.5hour`
     * **Minute**: `min`, `mins` (`s` is optional). Example: `30min`, `5mins`
     * **Second**: `s`. Example: `10s`, `0.5s`
     * **Millisecond**: `ms`. Example: `200ms`, `1ms`
-* **Length**:
+    * **Microsecond**: `us`. Example: `500us`, `1.5us`
+    * **Nanosecond**: `ns`. Example: `100ns`, `1ns`
+* **Length** (stored as `uom::si::f64::Length`):
     * **Meter**: `m`. Example: `10m`, `0.5m`
     * **Centimeter**: `cm`. Example: `50cm`, `2.5cm`
     * **Millimeter**: `mm`. Example: `100mm`, `1mm`
+    * **Micrometer**: `um`. Example: `500um`, `1.5um`
+    * **Nanometer**: `nm`. Example: `100nm`, `1nm`
 * **Range**: Including unbound variants and empty `..`.
     * **Time**: Example: `1ms..5.3hours`, `6s..`
     * **Length**: Example: `1mm..100m`, `..4m`
@@ -102,7 +110,7 @@ Add this to your `Cargo.toml`.
 
 ~~~toml
 [dependencies]
-ratslang = "0.1.0"
+ratslang = "0.2.0"
 ~~~
 
 First, you compile a Ratslang file to get a cleaned Abstract Syntax Tree (AST) with all variables resolved.
@@ -147,6 +155,45 @@ let path: String = resolve_path!(configs, "_file")?; // e.g., `_file = /abs/or/r
 let (d_min, d_max) = resolve_length_range_meters_float!(configs, "len", 0.0, 10.0)?; // meters as f64
 let (t_min, t_max) = resolve_time_range_seconds_float!(configs, "time_is_running", 0.0, 60.0)?; // seconds as f64
 let (i_min, i_max) = resolve_int_range!(configs, "my.super.long.prefix.var", 0, 100)?;
+~~~
+
+Working with uom types directly:
+
+Physical values in Ratslang are stored as `uom` types (`Length` and `Time`), giving you full access to type-safe unit conversions:
+
+~~~rust
+use ratslang::{compile_code, Rhs, Val, UnitVal, Unit};
+use ratslang::{meter, millimeter, micrometer, nanometer};  // Length units
+use ratslang::{second, millisecond, microsecond, nanosecond};  // Time units
+
+let code = r#"
+    sensor_range = 500um
+    timeout = 1500ns
+"#;
+
+let ast = compile_code(code).unwrap();
+
+// Get a length value and convert to any unit
+if let Some(Rhs::Val(Val::UnitedVal(uv))) = ast.vars.resolve("sensor_range").unwrap() {
+    // Access the underlying uom::si::f64::Length
+    let length = uv.as_length().unwrap();
+    
+    // Convert to any unit with full precision using uom getters
+    println!("Range: {} micrometers", length.get::<micrometer>());  // 500.0
+    println!("Range: {} millimeters", length.get::<millimeter>());  // 0.5
+    println!("Range: {} meters", length.get::<meter>());            // 0.0005
+    println!("Range: {} nanometers", length.get::<nanometer>());    // 500000.0
+}
+
+// Get a time value
+if let Some(Rhs::Val(Val::UnitedVal(uv))) = ast.vars.resolve("timeout").unwrap() {
+    let time = uv.as_time().unwrap();
+    
+    // Convert to any unit with full precision using uom getters
+    println!("Timeout: {} nanoseconds", time.get::<nanosecond>());   // 1500.0
+    println!("Timeout: {} microseconds", time.get::<microsecond>()); // 1.5
+    println!("Timeout: {} milliseconds", time.get::<millisecond>()); // 0.0015
+}
 ~~~
 
 Manual resolution:
@@ -201,7 +248,7 @@ let k_neighbors: usize = resolve_var!(configs, k_neighborhood, as usize,
 
 The following features and improvements are planned:
 
-* **Expanded Units and Scales**: Integrate more diverse units and scales with centralized conversion, ranging from astronomy to quantum physics, powered by the `uom` crate.
+* **Expanded Units and Scales**: Add more unit types (mass, angle, temperature, etc.) powered by the `uom` crate.
 * **Opt-in Language Versioning**: Implement an opt-in versioning system for `.rl` files.
 
 ---
