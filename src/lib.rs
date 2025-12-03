@@ -3,16 +3,18 @@
 //! A compact configuration language for physical systems with native support for time and length units.
 //!
 //! Ratslang solves the unit conversion problem that plagues physical system configuration, while keeping
-//! the implementation simple and declarative.
+//! the implementation simple and declarative. Physical units are stored directly as [`uom`](https://crates.io/crates/uom)
+//! types (`Length` and `Time`) for full type-safety and precision.
 //!
 //! ## Features
 //!
-//! - **Time units:** `ms`, `s`, `min`/`mins`, `hour`/`hours`
-//! - **Length units:** `mm`, `cm`, `m`
+//! - **Time units:** `ns`, `us`, `ms`, `s`, `min`/`mins`, `hour`/`hours` (stored as `uom::si::f64::Time`)
+//! - **Length units:** `nm`, `um`, `mm`, `cm`, `m` (stored as `uom::si::f64::Length`)
 //! - **Ranges:** `1mm..100m`, `5s..`, `..10m`, `..`
 //! - **Namespaces:** Dot notation (`sensor.range`) or blocks
 //! - **Includes:** Compose configuration files with namespace scoping
 //! - **Types:** Booleans, integers, floats, strings, paths, arrays
+//! - **Type-safe units:** Values stored directly as `uom` types - no conversion or rounding
 //!
 //! ## Example
 //!
@@ -62,12 +64,12 @@
 //! ```
 //!
 //! > **Note:** Ratslang is deliberately simple—no arithmetic, loops, or conditionals.
-//! 
+//!
 //! ## Syntax Highlighting
-//! 
+//!
 //! Syntax highlighting is available with [this tree-sitter grammar](https://github.com/stelzo/tree-sitter-ratslang) or [this VS Code extension](https://marketplace.visualstudio.com/items?itemName=stelzo.ratslang).
 
-use core::{fmt, panic};
+use core::fmt;
 use std::{collections::HashMap, path::PathBuf, str::FromStr};
 
 use anyhow::anyhow;
@@ -79,92 +81,79 @@ use chumsky::{
     prelude::*,
 };
 
-fn floating_millimeter<'a>(lex: &mut Lexer<'a, Token<'a>>) -> Option<f64> {
+// Re-export uom types for users
+pub use uom::si::f64::{Length, Time};
+pub use uom::si::length::{centimeter, meter, micrometer, millimeter, nanometer};
+pub use uom::si::time::{hour, microsecond, millisecond, minute, nanosecond, second};
+
+// Length parsing functions - return uom Length directly
+fn parse_length_mm<'a>(lex: &mut Lexer<'a, Token<'a>>) -> Option<Length> {
     let slice = lex.slice();
-    let f: f64 = slice[..slice.len() - 2].parse().ok()?;
-    Some(f)
+    let val: f64 = slice[..slice.len() - 2].parse().ok()?;
+    Some(Length::new::<millimeter>(val))
 }
 
-fn floating_centimeter<'a>(lex: &mut Lexer<'a, Token<'a>>) -> Option<f64> {
+fn parse_length_cm<'a>(lex: &mut Lexer<'a, Token<'a>>) -> Option<Length> {
     let slice = lex.slice();
-    let f: f64 = slice[..slice.len() - 2].parse().ok()?;
-    Some(f * 10.0)
+    let val: f64 = slice[..slice.len() - 2].parse().ok()?;
+    Some(Length::new::<centimeter>(val))
 }
 
-fn floating_meter<'a>(lex: &mut Lexer<'a, Token<'a>>) -> Option<f64> {
+fn parse_length_m<'a>(lex: &mut Lexer<'a, Token<'a>>) -> Option<Length> {
     let slice = lex.slice();
-    let f: f64 = slice[..slice.len() - 1].parse().ok()?;
-    Some(f * 10.0 * 100.0)
+    let val: f64 = slice[..slice.len() - 1].parse().ok()?;
+    Some(Length::new::<meter>(val))
 }
 
-fn integer_millimeter<'a>(lex: &mut Lexer<'a, Token<'a>>) -> Option<i64> {
+fn parse_length_um<'a>(lex: &mut Lexer<'a, Token<'a>>) -> Option<Length> {
     let slice = lex.slice();
-    let f: i64 = slice[..slice.len() - 2].parse().ok()?;
-    Some(f)
+    let val: f64 = slice[..slice.len() - 2].parse().ok()?;
+    Some(Length::new::<micrometer>(val))
 }
 
-fn integer_centimeter<'a>(lex: &mut Lexer<'a, Token<'a>>) -> Option<i64> {
+fn parse_length_nm<'a>(lex: &mut Lexer<'a, Token<'a>>) -> Option<Length> {
     let slice = lex.slice();
-    let f: i64 = slice[..slice.len() - 2].parse().ok()?;
-    Some(f * 10)
+    let val: f64 = slice[..slice.len() - 2].parse().ok()?;
+    Some(Length::new::<nanometer>(val))
 }
 
-fn integer_meter<'a>(lex: &mut Lexer<'a, Token<'a>>) -> Option<i64> {
+// Time parsing functions - return uom Time directly
+fn parse_time_s<'a>(lex: &mut Lexer<'a, Token<'a>>) -> Option<Time> {
     let slice = lex.slice();
-    let f: i64 = slice[..slice.len() - 1].parse().ok()?;
-    Some(f * 10 * 100)
+    let val: f64 = slice[..slice.len() - 1].parse().ok()?;
+    Some(Time::new::<second>(val))
 }
 
-fn integer_second<'a>(lex: &mut Lexer<'a, Token<'a>>) -> Option<i64> {
+fn parse_time_ms<'a>(lex: &mut Lexer<'a, Token<'a>>) -> Option<Time> {
     let slice = lex.slice();
-    let f: i64 = slice[..slice.len() - 1].parse().ok()?;
-    Some(f * 1000)
+    let val: f64 = slice[..slice.len() - 2].parse().ok()?;
+    Some(Time::new::<millisecond>(val))
 }
 
-fn integer_minute<'a>(lex: &mut Lexer<'a, Token<'a>>) -> Option<i64> {
+fn parse_time_us<'a>(lex: &mut Lexer<'a, Token<'a>>) -> Option<Time> {
+    let slice = lex.slice();
+    let val: f64 = slice[..slice.len() - 2].parse().ok()?;
+    Some(Time::new::<microsecond>(val))
+}
+
+fn parse_time_ns<'a>(lex: &mut Lexer<'a, Token<'a>>) -> Option<Time> {
+    let slice = lex.slice();
+    let val: f64 = slice[..slice.len() - 2].parse().ok()?;
+    Some(Time::new::<nanosecond>(val))
+}
+
+fn parse_time_min<'a>(lex: &mut Lexer<'a, Token<'a>>) -> Option<Time> {
     let slice = lex.slice();
     let len = if slice.ends_with("mins") { 4 } else { 3 };
-    let f: i64 = slice[..slice.len() - len].parse().ok()?;
-    Some(f * 60 * 1000)
+    let val: f64 = slice[..slice.len() - len].parse().ok()?;
+    Some(Time::new::<minute>(val))
 }
 
-fn integer_millisec<'a>(lex: &mut Lexer<'a, Token<'a>>) -> Option<i64> {
-    let slice = lex.slice();
-    let f: i64 = slice[..slice.len() - 2].parse().ok()?;
-    Some(f)
-}
-
-fn integer_hour<'a>(lex: &mut Lexer<'a, Token<'a>>) -> Option<i64> {
+fn parse_time_hour<'a>(lex: &mut Lexer<'a, Token<'a>>) -> Option<Time> {
     let slice = lex.slice();
     let len = if slice.ends_with("hours") { 5 } else { 4 };
-    let f: i64 = slice[..slice.len() - len].parse().ok()?;
-    Some(f * 60 * 60 * 1000)
-}
-
-fn floating_second<'a>(lex: &mut Lexer<'a, Token<'a>>) -> Option<f64> {
-    let slice = lex.slice();
-    let f: f64 = slice[..slice.len() - 1].parse().ok()?;
-    Some(f * 1000.0)
-}
-
-fn floating_minute<'a>(lex: &mut Lexer<'a, Token<'a>>) -> Option<f64> {
-    let slice = lex.slice();
-    let len = if slice.ends_with("mins") { 4 } else { 3 };
-    let f: f64 = slice[..slice.len() - len].parse().ok()?;
-    Some(f * 60.0 * 1000.0)
-}
-
-fn floating_millisec<'a>(lex: &mut Lexer<'a, Token<'a>>) -> Option<f64> {
-    let slice = lex.slice();
-    let f: f64 = slice[..slice.len() - 2].parse().ok()?;
-    Some(f)
-}
-
-fn floating_hour<'a>(lex: &mut Lexer<'a, Token<'a>>) -> Option<f64> {
-    let slice = lex.slice();
-    let len = if slice.ends_with("hours") { 5 } else { 4 };
-    let f: f64 = slice[..slice.len() - len].parse().ok()?;
-    Some(f * 60.0 * 60.0 * 1000.0)
+    let val: f64 = slice[..slice.len() - len].parse().ok()?;
+    Some(Time::new::<hour>(val))
 }
 
 fn rm_first_and_last<'a>(lex: &mut Lexer<'a, Token<'a>>) -> &'a str {
@@ -238,27 +227,35 @@ enum Token<'a> {
     #[token("false")]
     False,
 
-    #[regex(r"[+-]?\d+\.\d*mm", floating_millimeter)]
-    #[regex(r"[+-]?\d+\.\d*m", floating_meter)]
-    #[regex(r"[+-]?\d+\.\d*cm", floating_centimeter)]
-    FloatingNumberMillimeter(f64),
+    // Length tokens - store uom::si::f64::Length directly
+    // Use priority to ensure unit tokens match before plain numbers
+    // Match either integer (no decimal) or float (with decimal and at least one digit after)
+    #[regex(r"[+-]?\d+mm", parse_length_mm, priority = 3)]
+    #[regex(r"[+-]?\d+\.\d+mm", parse_length_mm, priority = 3)]
+    #[regex(r"[+-]?\d+cm", parse_length_cm, priority = 3)]
+    #[regex(r"[+-]?\d+\.\d+cm", parse_length_cm, priority = 3)]
+    #[regex(r"[+-]?\d+um", parse_length_um, priority = 3)]
+    #[regex(r"[+-]?\d+\.\d+um", parse_length_um, priority = 3)]
+    #[regex(r"[+-]?\d+nm", parse_length_nm, priority = 3)]
+    #[regex(r"[+-]?\d+\.\d+nm", parse_length_nm, priority = 3)]
+    #[regex(r"[+-]?\d+m", parse_length_m, priority = 2)]
+    #[regex(r"[+-]?\d+\.\d+m", parse_length_m, priority = 2)]
+    LengthToken(Length),
 
-    #[regex(r"[+-]?\d+\.\d*s", floating_second)]
-    #[regex(r"[+-]?\d+\.\d*ms", floating_millisec)]
-    #[regex(r"[+-]?\d+\.\d*mins?", floating_minute)]
-    #[regex(r"[+-]?\d+\.\d*hours?", floating_hour)]
-    FloatingNumberMillisecond(f64),
-
-    #[regex(r"[+-]?\d+cm", integer_centimeter)]
-    #[regex(r"[+-]?\d+mm", integer_millimeter)]
-    #[regex(r"[+-]?\d+m", integer_meter)]
-    IntegerNumberMillimeter(i64),
-
-    #[regex(r"[+-]?\d+s", integer_second)]
-    #[regex(r"[+-]?\d+ms", integer_millisec)]
-    #[regex(r"[+-]?\d+mins?", integer_minute)]
-    #[regex(r"[+-]?\d+hours?", integer_hour)]
-    IntegerNumberMillisecond(i64),
+    // Time tokens - store uom::si::f64::Time directly
+    #[regex(r"[+-]?\d+ms", parse_time_ms, priority = 3)]
+    #[regex(r"[+-]?\d+\.\d+ms", parse_time_ms, priority = 3)]
+    #[regex(r"[+-]?\d+us", parse_time_us, priority = 3)]
+    #[regex(r"[+-]?\d+\.\d+us", parse_time_us, priority = 3)]
+    #[regex(r"[+-]?\d+ns", parse_time_ns, priority = 3)]
+    #[regex(r"[+-]?\d+\.\d+ns", parse_time_ns, priority = 3)]
+    #[regex(r"[+-]?\d+mins?", parse_time_min, priority = 3)]
+    #[regex(r"[+-]?\d+\.\d+mins?", parse_time_min, priority = 3)]
+    #[regex(r"[+-]?\d+hours?", parse_time_hour, priority = 3)]
+    #[regex(r"[+-]?\d+\.\d+hours?", parse_time_hour, priority = 3)]
+    #[regex(r"[+-]?\d+s", parse_time_s, priority = 2)]
+    #[regex(r"[+-]?\d+\.\d+s", parse_time_s, priority = 2)]
+    TimeToken(Time),
 
     #[regex(r"[+-]?\d+\.\d+", |lex| lex.slice().parse().ok())]
     FloatingNumber(f64),
@@ -294,10 +291,8 @@ impl fmt::Display for Token<'_> {
             Self::False => write!(f, "false"),
             Self::IntegerNumber(s) => write!(f, "{}", s),
             Self::FloatingNumber(s) => write!(f, "{}", s),
-            Self::FloatingNumberMillimeter(s) => write!(f, "{}mm", s),
-            Self::FloatingNumberMillisecond(s) => write!(f, "{}ms", s),
-            Self::IntegerNumberMillimeter(s) => write!(f, "{}mm", s),
-            Self::IntegerNumberMillisecond(s) => write!(f, "{}ms", s),
+            Self::LengthToken(l) => write!(f, "{}m", l.get::<meter>()),
+            Self::TimeToken(t) => write!(f, "{}s", t.get::<second>()),
             Self::Identifier(s) => write!(f, "{}", s),
             Self::Dot => write!(f, "."),
         }
@@ -351,19 +346,94 @@ impl NumVal {
     }
 }
 
-/// Physical units supported by the language.
+/// Physical unit types supported by the language.
+///
+/// This enum distinguishes between different physical dimensions (length vs time)
+/// while the actual values are stored with full precision using the `uom` crate.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Unit {
-    /// Time measured in milliseconds.
-    TimeMilliseconds,
-    /// Distance/length measured in millimeters.
-    WayMillimeter,
+    /// Time unit (stored internally using uom's Time type in seconds)
+    Time,
+    /// Length/distance unit (stored internally using uom's Length type in meters)
+    Length,
+}
+
+/// A physical quantity with its unit, using the `uom` crate for type-safe dimensional analysis.
+///
+/// Values are stored directly as `uom` types (`Length` or `Time`) preserving full type safety
+/// and precision. No conversion or reconstruction is needed when accessing values.
+#[derive(Debug, Clone, Copy)]
+pub enum UnitVal {
+    /// A length/distance value stored as uom::si::f64::Length
+    LengthVal(Length),
+    /// A time/duration value stored as uom::si::f64::Time  
+    TimeVal(Time),
+}
+
+impl UnitVal {
+    /// Creates a new length value from a `uom::si::f64::Length`
+    pub fn from_length(length: Length) -> Self {
+        Self::LengthVal(length)
+    }
+
+    /// Creates a new time value from a `uom::si::f64::Time`
+    pub fn from_time(time: Time) -> Self {
+        Self::TimeVal(time)
+    }
+
+    /// Returns the unit type (Length or Time)
+    pub fn unit(&self) -> Unit {
+        match self {
+            Self::LengthVal(_) => Unit::Length,
+            Self::TimeVal(_) => Unit::Time,
+        }
+    }
+
+    /// Returns the value as a `uom::si::f64::Length` if this is a length unit.
+    /// Returns None if this is a time unit.
+    pub fn as_length(&self) -> Option<Length> {
+        match self {
+            Self::LengthVal(l) => Some(*l),
+            Self::TimeVal(_) => None,
+        }
+    }
+
+    /// Returns the value as a `uom::si::f64::Time` if this is a time unit.
+    /// Returns None if this is a length unit.
+    pub fn as_time(&self) -> Option<Time> {
+        match self {
+            Self::TimeVal(t) => Some(*t),
+            Self::LengthVal(_) => None,
+        }
+    }
+}
+
+impl PartialEq for UnitVal {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::LengthVal(l1), Self::LengthVal(l2)) => {
+                // Use relative tolerance for floating point comparison (in nanometers for precision)
+                let tolerance: f64 = 1e-9;
+                let v1 = l1.get::<nanometer>();
+                let v2 = l2.get::<nanometer>();
+                (v1 - v2).abs() < tolerance.max(v1.abs() * tolerance)
+            }
+            (Self::TimeVal(t1), Self::TimeVal(t2)) => {
+                // Use relative tolerance for floating point comparison (in nanoseconds for precision)
+                let tolerance: f64 = 1e-9;
+                let v1 = t1.get::<nanosecond>();
+                let v2 = t2.get::<nanosecond>();
+                (v1 - v2).abs() < tolerance.max(v1.abs() * tolerance)
+            }
+            _ => false, // Different unit types are never equal
+        }
+    }
 }
 
 /// A value in the language, which can be a number (with or without units), string, or boolean.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Val {
-    /// A numeric value with a physical unit.
+    /// A numeric value with a physical unit (using uom for precision).
     UnitedVal(UnitVal),
     /// A numeric value without units.
     NumVal(NumVal),
@@ -373,17 +443,8 @@ pub enum Val {
     BoolVal(bool),
 }
 
-/// A numeric value paired with a physical unit.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct UnitVal {
-    /// The numeric value (stored as integer, representing the base unit).
-    pub val: i64,
-    /// The physical unit of the value.
-    pub unit: Unit,
-}
-
 /// Right-hand side of an assignment, representing various expression types.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Rhs {
     /// A range expression with optional lower and upper bounds.
     Range { from: Option<Val>, to: Option<Val> },
@@ -689,11 +750,11 @@ pub enum StatementPass1 {
 #[derive(Debug, Clone)]
 pub enum Statement {
     /// Assignment statement with one or more variables on the left and expressions on the right.
-    AssignLeft { 
+    AssignLeft {
         /// Variables being assigned to.
-        lhs: Vec<Var>, 
+        lhs: Vec<Var>,
         /// Expressions being assigned.
-        rhs: Vec<Rhs> 
+        rhs: Vec<Rhs>,
     },
 }
 
@@ -737,28 +798,27 @@ where
     let mut file_content = Recursive::declare();
 
     let rhs = recursive(|rhs| {
-        let val =
-            {
-                let time = select! {
-                Token::IntegerNumberMillisecond(ms) => NumVal::Integer(ms),
-                Token::FloatingNumberMillisecond(ms) => NumVal::Floating(ms).integerize_unit_val(),
+        let val = {
+            // Time values: directly from uom Time token
+            let time = select! {
+                Token::TimeToken(t) => t,
             }
-            .map(|val| Val::UnitedVal(UnitVal { val: val.as_int(), unit: Unit::TimeMilliseconds }));
+            .map(|t| Val::UnitedVal(UnitVal::from_time(t)));
 
-                let way = select! {
-                Token::IntegerNumberMillimeter(mm) => NumVal::Integer(mm),
-                Token::FloatingNumberMillimeter(mm) => NumVal::Floating(mm).integerize_unit_val(),
+            // Length values: directly from uom Length token
+            let way = select! {
+                Token::LengthToken(l) => l,
             }
-            .map(|val| Val::UnitedVal(UnitVal { val: val.as_int(), unit: Unit::WayMillimeter }));
+            .map(|l| Val::UnitedVal(UnitVal::from_length(l)));
 
-                let number = select! {
-                    Token::IntegerNumber(i) => NumVal::Integer(i),
-                    Token::FloatingNumber(f) => NumVal::Floating(f),
-                }
-                .map(Val::NumVal);
+            let number = select! {
+                Token::IntegerNumber(i) => NumVal::Integer(i),
+                Token::FloatingNumber(f) => NumVal::Floating(f),
+            }
+            .map(Val::NumVal);
 
-                choice((time, way, number))
-            };
+            choice((time, way, number))
+        };
 
         let bounded_range = val
             .clone()
@@ -1587,7 +1647,7 @@ pub fn compile_code_with_state(
 /// # Examples
 ///
 /// ```rust
-/// use ratslang::{compile_code, resolve_var, resolve_length_range_meters_float, Rhs, Val, NumVal, Unit};
+/// use ratslang::{compile_code, resolve_var, resolve_length_range_meters_float, Rhs, Val, NumVal, Unit, meter};
 /// use anyhow::anyhow;
 ///
 /// # fn main() -> anyhow::Result<()> {
@@ -1613,10 +1673,10 @@ pub fn compile_code_with_state(
 #[macro_export]
 macro_rules! resolve_length_range_meters_float {
     ($ns:expr, $field:expr, $default_from:expr, $default_to:expr) => {{
-        let convert_mm_to_meters = |val: &Val| -> anyhow::Result<f64> {
+        let convert_to_meters = |val: &Val| -> anyhow::Result<f64> {
             match val {
-                Val::UnitedVal(uv) if uv.unit == Unit::WayMillimeter => {
-                    Ok((uv.val as f64) / 1000.0)
+                Val::UnitedVal(uv) if uv.unit() == Unit::Length => {
+                    Ok(uv.as_length().unwrap().get::<meter>())
                 },
                 _ => Err(anyhow!("Expected a united length value for range '{}'", $field))
             }
@@ -1628,8 +1688,8 @@ macro_rules! resolve_length_range_meters_float {
         match rhs_val {
             Rhs::EmptyRange => Ok(($default_from, $default_to)),
             Rhs::Range { from, to } => {
-                let from_val = from.as_ref().map_or(Ok($default_from), |v| convert_mm_to_meters(v))?;
-                let to_val = to.as_ref().map_or(Ok($default_to), |v| convert_mm_to_meters(v))?;
+                let from_val = from.as_ref().map_or(Ok($default_from), |v| convert_to_meters(v))?;
+                let to_val = to.as_ref().map_or(Ok($default_to), |v| convert_to_meters(v))?;
                 Ok((from_val, to_val))
             }
             _ => Err(anyhow!("Expected a range expression for field '{}'", $field))
@@ -1885,7 +1945,7 @@ macro_rules! resolve_float_range {
 /// # Examples
 ///
 /// ```rust
-/// use ratslang::{compile_code, resolve_var, resolve_time_range_seconds_float, Rhs, Val, NumVal, Unit};
+/// use ratslang::{compile_code, resolve_var, resolve_time_range_seconds_float, Rhs, Val, NumVal, Unit, second};
 /// use anyhow::anyhow;
 ///
 /// # fn main() -> anyhow::Result<()> {
@@ -1911,10 +1971,10 @@ macro_rules! resolve_float_range {
 #[macro_export]
 macro_rules! resolve_time_range_seconds_float {
     ($ns:expr, $field:expr, $default_from:expr, $default_to:expr) => {{
-        let convert_ms_to_seconds = |val: &Val| -> anyhow::Result<f64> {
+        let convert_to_seconds = |val: &Val| -> anyhow::Result<f64> {
             match val {
-                Val::UnitedVal(uv) if uv.unit == Unit::TimeMilliseconds => {
-                    Ok((uv.val as f64) / 1000.0)
+                Val::UnitedVal(uv) if uv.unit() == Unit::Time => {
+                    Ok(uv.as_time().unwrap().get::<second>())
                 },
                 _ => Err(anyhow!("Expected a united time value for range '{}'", $field))
             }
@@ -1926,8 +1986,8 @@ macro_rules! resolve_time_range_seconds_float {
         match rhs_val {
             Rhs::EmptyRange => Ok(($default_from, $default_to)),
             Rhs::Range { from, to } => {
-                let from_val = from.as_ref().map_or(Ok($default_from), |v| convert_ms_to_seconds(v))?;
-                let to_val = to.as_ref().map_or(Ok($default_to), |v| convert_ms_to_seconds(v))?;
+                let from_val = from.as_ref().map_or(Ok($default_from), |v| convert_to_seconds(v))?;
+                let to_val = to.as_ref().map_or(Ok($default_to), |v| convert_to_seconds(v))?;
                 Ok((from_val, to_val))
             }
             _ => Err(anyhow!("Expected a range expression for field '{}'", $field))
@@ -2132,7 +2192,7 @@ macro_rules! resolve_int {
 #[macro_export]
 macro_rules! resolve_float {
     ($ns:expr, $field:expr) => {{
-        use $crate::{Rhs, Val, NumVal};
+        use $crate::{NumVal, Rhs, Val};
         let __var_name_str = $field;
         let __resolved_opt = match $ns.user.resolve(__var_name_str)? {
             Some(val) => Some(val),
@@ -2142,8 +2202,14 @@ macro_rules! resolve_float {
         match __resolved_opt {
             Some(Rhs::Val(Val::NumVal(NumVal::Floating(f)))) => Ok(f),
             Some(Rhs::Val(Val::NumVal(NumVal::Integer(i)))) => Ok(i as f64),
-            Some(_) => Err(anyhow!(format!("Pattern mismatch for '{}'. Expected numeric value.", __var_name_str))),
-            None => Err(anyhow!(format!("Required variable '{}' not found in any configuration.", __var_name_str))),
+            Some(_) => Err(anyhow!(format!(
+                "Pattern mismatch for '{}'. Expected numeric value.",
+                __var_name_str
+            ))),
+            None => Err(anyhow!(format!(
+                "Required variable '{}' not found in any configuration.",
+                __var_name_str
+            ))),
         }
     }};
 }
@@ -2556,29 +2622,39 @@ mod tests {
             }
         );
 
+        // 3m = 3.0 meters
         let res_upper_unit = eval.vars.resolve("open_upper_unit").unwrap().unwrap();
-        assert_eq!(
-            res_upper_unit,
-            Rhs::Range {
-                from: Some(Val::UnitedVal(UnitVal {
-                    val: 3000,
-                    unit: Unit::WayMillimeter
-                })),
-                to: None
-            }
-        );
+        if let Rhs::Range {
+            from: Some(Val::UnitedVal(uv)),
+            to: None,
+        } = res_upper_unit
+        {
+            assert_eq!(uv.unit(), Unit::Length);
+            assert!(
+                (uv.as_length().unwrap().get::<meter>() - 3.0).abs() < 1e-9,
+                "Expected 3.0 meters, got {}",
+                uv.as_length().unwrap().get::<meter>()
+            );
+        } else {
+            panic!("Expected Range with Length UnitedVal");
+        }
 
+        // 4s = 4.0 seconds
         let res_lower_unit = eval.vars.resolve("open_lower_unit").unwrap().unwrap();
-        assert_eq!(
-            res_lower_unit,
-            Rhs::Range {
-                from: None,
-                to: Some(Val::UnitedVal(UnitVal {
-                    val: 4000,
-                    unit: Unit::TimeMilliseconds
-                }))
-            }
-        );
+        if let Rhs::Range {
+            from: None,
+            to: Some(Val::UnitedVal(uv)),
+        } = res_lower_unit
+        {
+            assert_eq!(uv.unit(), Unit::Time);
+            assert!(
+                (uv.as_time().unwrap().get::<second>() - 4.0).abs() < 1e-9,
+                "Expected 4.0 seconds, got {}",
+                uv.as_time().unwrap().get::<second>()
+            );
+        } else {
+            panic!("Expected Range with Time UnitedVal");
+        }
 
         let res_empty = eval.vars.resolve("empty").unwrap().unwrap();
         assert_eq!(res_empty, Rhs::EmptyRange);
@@ -2651,8 +2727,12 @@ mat = [ [ 6, 1, 9 ],
     fn error_int_range_with_float_values() {
         let code = "count = 1.5..2.5";
         let ast = compile_code(code).unwrap();
-        let configs = Configs { user: ast.vars, defaults: VariableHistory::new(vec![]) };
-        let res = (|| -> anyhow::Result<(i64,i64)> { resolve_int_range!(configs, "count", 0, 10) })();
+        let configs = Configs {
+            user: ast.vars,
+            defaults: VariableHistory::new(vec![]),
+        };
+        let res =
+            (|| -> anyhow::Result<(i64, i64)> { resolve_int_range!(configs, "count", 0, 10) })();
         assert!(res.is_err());
         let msg = format!("{}", res.err().unwrap());
         assert!(msg.contains("Expected integer value for 'from'"));
@@ -2662,8 +2742,13 @@ mat = [ [ 6, 1, 9 ],
     fn error_float_range_with_integer_values() {
         let code = "ratio = 1..2";
         let ast = compile_code(code).unwrap();
-        let configs = Configs { user: ast.vars, defaults: VariableHistory::new(vec![]) };
-        let res = (|| -> anyhow::Result<(f64,f64)> { resolve_float_range!(configs, "ratio", 0.0, 10.0) })();
+        let configs = Configs {
+            user: ast.vars,
+            defaults: VariableHistory::new(vec![]),
+        };
+        let res = (|| -> anyhow::Result<(f64, f64)> {
+            resolve_float_range!(configs, "ratio", 0.0, 10.0)
+        })();
         assert!(res.is_err());
         let msg = format!("{}", res.err().unwrap());
         assert!(msg.contains("Expected floating value for 'from'"));
@@ -2673,8 +2758,12 @@ mat = [ [ 6, 1, 9 ],
     fn error_string_with_bool() {
         let code = "name = true";
         let ast = compile_code(code).unwrap();
-        let configs = Configs { user: ast.vars, defaults: VariableHistory::new(vec![]) };
-        let res: anyhow::Result<String> = (|| -> anyhow::Result<String> { resolve_string!(configs, "name") })();
+        let configs = Configs {
+            user: ast.vars,
+            defaults: VariableHistory::new(vec![]),
+        };
+        let res: anyhow::Result<String> =
+            (|| -> anyhow::Result<String> { resolve_string!(configs, "name") })();
         assert!(res.is_err());
         let msg = format!("{}", res.err().unwrap());
         assert!(msg.contains("Pattern mismatch"));
@@ -2684,8 +2773,12 @@ mat = [ [ 6, 1, 9 ],
     fn error_path_with_string_val() {
         let code = "_file = \"/path/to/file\""; // StringVal, not Path
         let ast = compile_code(code).unwrap();
-        let configs = Configs { user: ast.vars, defaults: VariableHistory::new(vec![]) };
-        let res: anyhow::Result<String> = (|| -> anyhow::Result<String> { resolve_path!(configs, "_file") })();
+        let configs = Configs {
+            user: ast.vars,
+            defaults: VariableHistory::new(vec![]),
+        };
+        let res: anyhow::Result<String> =
+            (|| -> anyhow::Result<String> { resolve_path!(configs, "_file") })();
         assert!(res.is_err());
         let msg = format!("{}", res.err().unwrap());
         assert!(msg.contains("Pattern mismatch"));
@@ -2696,8 +2789,13 @@ mat = [ [ 6, 1, 9 ],
         // Provide a united value with incorrect unit (e.g., milliseconds)
         let code = "distance = 1000ms..2000ms";
         let ast = compile_code(code).unwrap();
-        let configs = Configs { user: ast.vars, defaults: VariableHistory::new(vec![]) };
-        let res = (|| -> anyhow::Result<(f64,f64)> { resolve_length_range_meters_float!(configs, "distance", 0.5, 10.0) })();
+        let configs = Configs {
+            user: ast.vars,
+            defaults: VariableHistory::new(vec![]),
+        };
+        let res = (|| -> anyhow::Result<(f64, f64)> {
+            resolve_length_range_meters_float!(configs, "distance", 0.5, 10.0)
+        })();
         assert!(res.is_err());
         let msg = format!("{}", res.err().unwrap());
         assert!(msg.contains("Expected a united length value"));
@@ -2708,8 +2806,13 @@ mat = [ [ 6, 1, 9 ],
         // Provide a united value with wrong unit (e.g., millimeter)
         let code = "timeout = 1000mm..2000mm";
         let ast = compile_code(code).unwrap();
-        let configs = Configs { user: ast.vars, defaults: VariableHistory::new(vec![]) };
-        let res = (|| -> anyhow::Result<(f64,f64)> { resolve_time_range_seconds_float!(configs, "timeout", 0.0, 10.0) })();
+        let configs = Configs {
+            user: ast.vars,
+            defaults: VariableHistory::new(vec![]),
+        };
+        let res = (|| -> anyhow::Result<(f64, f64)> {
+            resolve_time_range_seconds_float!(configs, "timeout", 0.0, 10.0)
+        })();
         assert!(res.is_err());
         let msg = format!("{}", res.err().unwrap());
         assert!(msg.contains("Expected a united time value"));
@@ -3198,7 +3301,10 @@ mat = [ [ 6, 1, 9 ],
         // No variables defined; attempt to resolve a missing one
         let ast = compile_code("").unwrap();
         let defaults = VariableHistory::new(vec![]);
-        let configs = Configs { user: ast.vars, defaults };
+        let configs = Configs {
+            user: ast.vars,
+            defaults,
+        };
 
         // Use identifier form to validate the exact error message path
         let res: anyhow::Result<i64> = (|| -> anyhow::Result<i64> {
@@ -3210,5 +3316,303 @@ mat = [ [ 6, 1, 9 ],
         assert!(res.is_err());
         let msg = format!("{}", res.err().unwrap());
         assert!(msg.contains("Required variable 'missing_var' not found in any configuration."));
+    }
+
+    #[test]
+    fn micrometer_units() {
+        const SRC: &str = r"
+        micro_int = 1000um
+        micro_float = 1.5um
+        nano_int = 1000000nm
+        nano_float = 1.5nm
+        range_micro = 500um..1000um
+        ";
+
+        let eval = compile_code(SRC);
+        assert!(eval.is_ok(), "Failed to compile: {:?}", eval.err());
+        let eval = eval.unwrap();
+
+        // 1000um = 1mm = 0.001m (exact with uom)
+        let micro_int = eval.vars.resolve("micro_int").unwrap().unwrap();
+        if let Rhs::Val(Val::UnitedVal(uv)) = micro_int {
+            assert_eq!(uv.unit(), Unit::Length);
+            assert!(
+                (uv.as_length().unwrap().get::<micrometer>() - 1000.0).abs() < 1e-9,
+                "Expected 1000 micrometers, got {}",
+                uv.as_length().unwrap().get::<micrometer>()
+            );
+            assert!(
+                (uv.as_length().unwrap().get::<millimeter>() - 1.0).abs() < 1e-9,
+                "Expected 1 mm, got {}",
+                uv.as_length().unwrap().get::<millimeter>()
+            );
+        } else {
+            panic!("Expected UnitedVal");
+        }
+
+        // 1.5um preserved exactly (no rounding!)
+        let micro_float = eval.vars.resolve("micro_float").unwrap().unwrap();
+        if let Rhs::Val(Val::UnitedVal(uv)) = micro_float {
+            assert_eq!(uv.unit(), Unit::Length);
+            assert!(
+                (uv.as_length().unwrap().get::<micrometer>() - 1.5).abs() < 1e-9,
+                "Expected 1.5 micrometers, got {}",
+                uv.as_length().unwrap().get::<micrometer>()
+            );
+        } else {
+            panic!("Expected UnitedVal");
+        }
+
+        // 1000000nm = 1mm = 0.001m (exact with uom)
+        let nano_int = eval.vars.resolve("nano_int").unwrap().unwrap();
+        if let Rhs::Val(Val::UnitedVal(uv)) = nano_int {
+            assert_eq!(uv.unit(), Unit::Length);
+            assert!(
+                (uv.as_length().unwrap().get::<nanometer>() - 1_000_000.0).abs() < 1e-6,
+                "Expected 1000000 nanometers, got {}",
+                uv.as_length().unwrap().get::<nanometer>()
+            );
+            assert!(
+                (uv.as_length().unwrap().get::<millimeter>() - 1.0).abs() < 1e-9,
+                "Expected 1 mm, got {}",
+                uv.as_length().unwrap().get::<millimeter>()
+            );
+        } else {
+            panic!("Expected UnitedVal");
+        }
+
+        // 1.5nm preserved exactly (no rounding!)
+        let nano_float = eval.vars.resolve("nano_float").unwrap().unwrap();
+        if let Rhs::Val(Val::UnitedVal(uv)) = nano_float {
+            assert_eq!(uv.unit(), Unit::Length);
+            assert!(
+                (uv.as_length().unwrap().get::<nanometer>() - 1.5).abs() < 1e-9,
+                "Expected 1.5 nanometers, got {}",
+                uv.as_length().unwrap().get::<nanometer>()
+            );
+        } else {
+            panic!("Expected UnitedVal");
+        }
+
+        // Range: 500um..1000um preserved exactly
+        let range_micro = eval.vars.resolve("range_micro").unwrap().unwrap();
+        if let Rhs::Range {
+            from: Some(Val::UnitedVal(from_uv)),
+            to: Some(Val::UnitedVal(to_uv)),
+        } = range_micro
+        {
+            assert!(
+                (from_uv.as_length().unwrap().get::<micrometer>() - 500.0).abs() < 1e-9,
+                "Expected 500 um, got {}",
+                from_uv.as_length().unwrap().get::<micrometer>()
+            );
+            assert!(
+                (to_uv.as_length().unwrap().get::<micrometer>() - 1000.0).abs() < 1e-9,
+                "Expected 1000 um, got {}",
+                to_uv.as_length().unwrap().get::<micrometer>()
+            );
+        } else {
+            panic!("Expected Range with UnitedVal bounds");
+        }
+    }
+
+    #[test]
+    fn microsecond_units() {
+        const SRC: &str = r"
+        micro_int = 1000us
+        micro_float = 1.5us
+        nano_int = 1000000ns
+        nano_float = 1.5ns
+        range_micro = 500us..1000us
+        ";
+
+        let eval = compile_code(SRC);
+        assert!(eval.is_ok(), "Failed to compile: {:?}", eval.err());
+        let eval = eval.unwrap();
+
+        // 1000us = 1ms = 0.001s (exact with uom)
+        let micro_int = eval.vars.resolve("micro_int").unwrap().unwrap();
+        if let Rhs::Val(Val::UnitedVal(uv)) = micro_int {
+            assert_eq!(uv.unit(), Unit::Time);
+            assert!(
+                (uv.as_time().unwrap().get::<microsecond>() - 1000.0).abs() < 1e-9,
+                "Expected 1000 microseconds, got {}",
+                uv.as_time().unwrap().get::<microsecond>()
+            );
+            assert!(
+                (uv.as_time().unwrap().get::<millisecond>() - 1.0).abs() < 1e-9,
+                "Expected 1 ms, got {}",
+                uv.as_time().unwrap().get::<millisecond>()
+            );
+        } else {
+            panic!("Expected UnitedVal");
+        }
+
+        // 1.5us preserved exactly (no rounding!)
+        let micro_float = eval.vars.resolve("micro_float").unwrap().unwrap();
+        if let Rhs::Val(Val::UnitedVal(uv)) = micro_float {
+            assert_eq!(uv.unit(), Unit::Time);
+            assert!(
+                (uv.as_time().unwrap().get::<microsecond>() - 1.5).abs() < 1e-9,
+                "Expected 1.5 microseconds, got {}",
+                uv.as_time().unwrap().get::<microsecond>()
+            );
+        } else {
+            panic!("Expected UnitedVal");
+        }
+
+        // 1000000ns = 1ms = 0.001s (exact with uom)
+        let nano_int = eval.vars.resolve("nano_int").unwrap().unwrap();
+        if let Rhs::Val(Val::UnitedVal(uv)) = nano_int {
+            assert_eq!(uv.unit(), Unit::Time);
+            assert!(
+                (uv.as_time().unwrap().get::<nanosecond>() - 1_000_000.0).abs() < 1e-3,
+                "Expected 1000000 nanoseconds, got {}",
+                uv.as_time().unwrap().get::<nanosecond>()
+            );
+            assert!(
+                (uv.as_time().unwrap().get::<millisecond>() - 1.0).abs() < 1e-9,
+                "Expected 1 ms, got {}",
+                uv.as_time().unwrap().get::<millisecond>()
+            );
+        } else {
+            panic!("Expected UnitedVal");
+        }
+
+        // 1.5ns preserved exactly (no rounding!)
+        let nano_float = eval.vars.resolve("nano_float").unwrap().unwrap();
+        if let Rhs::Val(Val::UnitedVal(uv)) = nano_float {
+            assert_eq!(uv.unit(), Unit::Time);
+            assert!(
+                (uv.as_time().unwrap().get::<nanosecond>() - 1.5).abs() < 1e-9,
+                "Expected 1.5 nanoseconds, got {}",
+                uv.as_time().unwrap().get::<nanosecond>()
+            );
+        } else {
+            panic!("Expected UnitedVal");
+        }
+
+        // Range: 500us..1000us preserved exactly
+        let range_micro = eval.vars.resolve("range_micro").unwrap().unwrap();
+        if let Rhs::Range {
+            from: Some(Val::UnitedVal(from_uv)),
+            to: Some(Val::UnitedVal(to_uv)),
+        } = range_micro
+        {
+            assert!(
+                (from_uv.as_time().unwrap().get::<microsecond>() - 500.0).abs() < 1e-9,
+                "Expected 500 us, got {}",
+                from_uv.as_time().unwrap().get::<microsecond>()
+            );
+            assert!(
+                (to_uv.as_time().unwrap().get::<microsecond>() - 1000.0).abs() < 1e-9,
+                "Expected 1000 us, got {}",
+                to_uv.as_time().unwrap().get::<microsecond>()
+            );
+        } else {
+            panic!("Expected Range with UnitedVal bounds");
+        }
+    }
+
+    #[test]
+    fn accuracy_conversions_no_rounding() {
+        // Test that uom preserves precision - NO ROUNDING anymore!
+        const SRC: &str = r"
+        um_500 = 500um
+        nm_1 = 1nm
+        us_500 = 500us
+        ns_1 = 1ns
+        um_999999 = 999999um
+        us_999999 = 999999us
+        ";
+
+        let eval = compile_code(SRC).expect("Failed to compile");
+
+        // 500um = 0.5mm exactly
+        if let Rhs::Val(Val::UnitedVal(uv)) = eval.vars.resolve("um_500").unwrap().unwrap() {
+            assert!((uv.as_length().unwrap().get::<micrometer>() - 500.0).abs() < 1e-9);
+            assert!((uv.as_length().unwrap().get::<millimeter>() - 0.5).abs() < 1e-9);
+        } else {
+            panic!("Expected UnitedVal");
+        }
+
+        // 1nm = 0.000001mm exactly
+        if let Rhs::Val(Val::UnitedVal(uv)) = eval.vars.resolve("nm_1").unwrap().unwrap() {
+            assert!((uv.as_length().unwrap().get::<nanometer>() - 1.0).abs() < 1e-9);
+            assert!((uv.as_length().unwrap().get::<millimeter>() - 0.000001).abs() < 1e-12);
+        } else {
+            panic!("Expected UnitedVal");
+        }
+
+        // 500us = 0.5ms exactly
+        if let Rhs::Val(Val::UnitedVal(uv)) = eval.vars.resolve("us_500").unwrap().unwrap() {
+            assert!((uv.as_time().unwrap().get::<microsecond>() - 500.0).abs() < 1e-9);
+            assert!((uv.as_time().unwrap().get::<millisecond>() - 0.5).abs() < 1e-9);
+        } else {
+            panic!("Expected UnitedVal");
+        }
+
+        // 1ns = 0.000001ms exactly
+        if let Rhs::Val(Val::UnitedVal(uv)) = eval.vars.resolve("ns_1").unwrap().unwrap() {
+            assert!((uv.as_time().unwrap().get::<nanosecond>() - 1.0).abs() < 1e-9);
+            assert!((uv.as_time().unwrap().get::<millisecond>() - 0.000001).abs() < 1e-12);
+        } else {
+            panic!("Expected UnitedVal");
+        }
+
+        // 999999um = 999.999mm exactly
+        if let Rhs::Val(Val::UnitedVal(uv)) = eval.vars.resolve("um_999999").unwrap().unwrap() {
+            assert!((uv.as_length().unwrap().get::<micrometer>() - 999999.0).abs() < 1e-6);
+            assert!((uv.as_length().unwrap().get::<millimeter>() - 999.999).abs() < 1e-9);
+        } else {
+            panic!("Expected UnitedVal");
+        }
+
+        // 999999us = 999.999ms exactly
+        if let Rhs::Val(Val::UnitedVal(uv)) = eval.vars.resolve("us_999999").unwrap().unwrap() {
+            assert!((uv.as_time().unwrap().get::<microsecond>() - 999999.0).abs() < 1e-6);
+            assert!((uv.as_time().unwrap().get::<millisecond>() - 999.999).abs() < 1e-9);
+        } else {
+            panic!("Expected UnitedVal");
+        }
+    }
+
+    #[test]
+    fn accuracy_large_values_floating_point_precision() {
+        // Test large values - f64 has about 15-17 significant decimal digits
+        const SRC: &str = r"
+        large_um = 123456789012um
+        large_ns = 123456789012345ns
+        ";
+
+        let eval = compile_code(SRC).expect("Failed to compile");
+
+        // 123456789012um = 123456.789012m
+        if let Rhs::Val(Val::UnitedVal(uv)) = eval.vars.resolve("large_um").unwrap().unwrap() {
+            let expected_meters = 123456.789012;
+            let tolerance = expected_meters * 1e-12;
+            assert!(
+                (uv.as_length().unwrap().get::<meter>() - expected_meters).abs() < tolerance,
+                "large_um: expected {} m, got {} m",
+                expected_meters,
+                uv.as_length().unwrap().get::<meter>()
+            );
+        } else {
+            panic!("Expected UnitedVal");
+        }
+
+        // 123456789012345ns = 123456.789012345s (ns to s: divide by 10^9)
+        if let Rhs::Val(Val::UnitedVal(uv)) = eval.vars.resolve("large_ns").unwrap().unwrap() {
+            let expected_seconds = 123456.789012345;
+            let tolerance = expected_seconds * 1e-10;
+            assert!(
+                (uv.as_time().unwrap().get::<second>() - expected_seconds).abs() < tolerance,
+                "large_ns: expected {} s, got {} s",
+                expected_seconds,
+                uv.as_time().unwrap().get::<second>()
+            );
+        } else {
+            panic!("Expected UnitedVal");
+        }
     }
 }

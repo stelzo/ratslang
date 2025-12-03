@@ -48,11 +48,11 @@
       "patterns": [
         {
           "name": "constant.numeric.quantity.time",
-          "match": "\\b[+-]?(\\d+\\.\\d+|\\d+)(hours?|mins?|s|ms)\\b"
+          "match": "\\b[+-]?(\\d+\\.\\d+|\\d+)(hours?|mins?|s|ms|um|nm)\\b"
         },
         {
           "name": "constant.numeric.quantity.length",
-          "match": "\\b[+-]?(\\d+\\.\\d+|\\d+)(mm|cm|m)\\b"
+          "match": "\\b[+-]?(\\d+\\.\\d+|\\d+)(mm|cm|m|us|ns)\\b"
         }
       ]
     },
