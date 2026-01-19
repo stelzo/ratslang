@@ -1,24 +1,18 @@
 [package]
 name = "ratslang"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 authors = ["Christopher Sieh <stelzo@steado.de>"]
 description = "Simple configuration language for working with physical systems."
 repository = "https://github.com/stelzo/ratslang/"
 license = "MIT OR Apache-2.0"
 keywords = ["config", "lang", "parser", "robotics"]
-categories = [
-  "science::robotics",
-  "parser-implementations",
-]
+categories = ["science::robotics", "parser-implementations"]
 readme = "README.md"
 documentation = "https://docs.rs/ratslang"
 homepage = "https://github.com/stelzo/ratslang"
-exclude = [
-  ".cargo_vcs_info.json",
-  ".github/*",
-  "vscode/*",
-]
+exclude = [".cargo_vcs_info.json", ".github/*", "vscode/*", "target/*"]
+rust-version = "1.85"
 
 [dependencies]
 log = "0.4.28"

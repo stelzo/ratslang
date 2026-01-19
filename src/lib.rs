@@ -8,7 +8,7 @@
 //!
 //! ## Features
 //!
-//! - **Time units:** `ns`, `us`, `ms`, `s`, `min`/`mins`, `hour`/`hours` (stored as `uom::si::f64::Time`)
+//! - **Time units:** `ns`, `us`, `ms`, `s`, `min`, `h`, `d`, `a` (year), `shake` (and SI prefixes, stored as `uom::si::f64::Time`)
 //! - **Length units:** `nm`, `um`, `mm`, `cm`, `m` (stored as `uom::si::f64::Length`)
 //! - **Ranges:** `1mm..100m`, `5s..`, `..10m`, `..`
 //! - **Namespaces:** Dot notation (`sensor.range`) or blocks
@@ -70,7 +70,13 @@
 //! Syntax highlighting is available with [this tree-sitter grammar](https://github.com/stelzo/tree-sitter-ratslang) or [this VS Code extension](https://marketplace.visualstudio.com/items?itemName=stelzo.ratslang).
 
 use core::fmt;
-use std::{collections::HashMap, path::PathBuf, str::FromStr};
+use std::{
+    cell::RefCell,
+    collections::{HashMap, HashSet},
+    path::PathBuf,
+    rc::Rc,
+    str::FromStr,
+};
 
 use anyhow::anyhow;
 use ariadne::{Color, Label, Report, ReportKind, Source};
@@ -82,78 +88,121 @@ use chumsky::{
 };
 
 // Re-export uom types for users
+pub use uom;
 pub use uom::si::f64::{Length, Time};
-pub use uom::si::length::{centimeter, meter, micrometer, millimeter, nanometer};
-pub use uom::si::time::{hour, microsecond, millisecond, minute, nanosecond, second};
+pub use uom::si::length::{
+    angstrom, astronomical_unit, attometer, bohr_radius, centimeter, chain, decameter, decimeter,
+    exameter, fathom, femtometer, fermi, foot, gigameter, hectometer, inch, kilometer, light_year,
+    megameter, meter, microinch, micrometer, micron, mil, mile, millimeter, nanometer,
+    nautical_mile, parsec, petameter, picometer, rod, terameter, yard, yoctometer, yottameter,
+    zeptometer, zettameter,
+};
+pub use uom::si::time::{
+    attosecond, centisecond, day, day_sidereal, decasecond, decisecond, exasecond, femtosecond,
+    gigasecond, hectosecond, hour, hour_sidereal, kilosecond, megasecond, microsecond, millisecond,
+    minute, nanosecond, petasecond, picosecond, second, second_sidereal, shake, terasecond, year,
+    year_sidereal, year_tropical, yoctosecond, yottasecond, zeptosecond, zettasecond,
+};
 
-// Length parsing functions - return uom Length directly
-fn parse_length_mm<'a>(lex: &mut Lexer<'a, Token<'a>>) -> Option<Length> {
-    let slice = lex.slice();
-    let val: f64 = slice[..slice.len() - 2].parse().ok()?;
-    Some(Length::new::<millimeter>(val))
+fn split_num_unit(slice: &str) -> Option<(f64, &str)> {
+    let idx = slice
+        .find(|c: char| c.is_alphabetic() || c == 'µ')
+        .unwrap_or(slice.len());
+    if idx == 0 || idx == slice.len() {
+        return None;
+    }
+    let (num, unit) = slice.split_at(idx);
+    let val: f64 = num.parse().ok()?;
+    Some((val, unit))
 }
 
-fn parse_length_cm<'a>(lex: &mut Lexer<'a, Token<'a>>) -> Option<Length> {
-    let slice = lex.slice();
-    let val: f64 = slice[..slice.len() - 2].parse().ok()?;
-    Some(Length::new::<centimeter>(val))
+fn parse_length_prefixed<'a>(lex: &mut Lexer<'a, Token<'a>>) -> Option<Length> {
+    let (val, unit) = split_num_unit(lex.slice())?;
+    let l = match unit {
+        "ym" => Length::new::<yoctometer>(val),
+        "zm" => Length::new::<zeptometer>(val),
+        "am" => Length::new::<attometer>(val),
+        "fm" => Length::new::<femtometer>(val),
+        "pm" => Length::new::<picometer>(val),
+        "nm" => Length::new::<nanometer>(val),
+        "um" | "µm" => Length::new::<micrometer>(val),
+        "mm" => Length::new::<millimeter>(val),
+        "cm" => Length::new::<centimeter>(val),
+        "dm" => Length::new::<decimeter>(val),
+        "m" => Length::new::<meter>(val),
+        "dam" => Length::new::<decameter>(val),
+        "hm" => Length::new::<hectometer>(val),
+        "km" => Length::new::<kilometer>(val),
+        "Mm" => Length::new::<megameter>(val),
+        "Gm" => Length::new::<gigameter>(val),
+        "Tm" => Length::new::<terameter>(val),
+        "Pm" => Length::new::<petameter>(val),
+        "Em" => Length::new::<exameter>(val),
+        "Zm" => Length::new::<zettameter>(val),
+        "Ym" => Length::new::<yottameter>(val),
+        "angstrom" | "ångström" => Length::new::<angstrom>(val),
+        "ft" | "foot" | "feet" => Length::new::<foot>(val),
+        "in" | "inch" | "inches" => Length::new::<inch>(val),
+        "mi" | "mile" | "miles" => Length::new::<mile>(val),
+        "yd" | "yard" | "yards" => Length::new::<yard>(val),
+        "ch" | "chain" | "chains" => Length::new::<chain>(val),
+        "rd" | "rod" | "rods" => Length::new::<rod>(val),
+        "fathom" | "fathoms" => Length::new::<fathom>(val),
+        "ua" | "au" | "astronomical_unit" | "astronomical_units" => {
+            Length::new::<astronomical_unit>(val)
+        }
+        "l.y." | "light_year" | "light_years" => Length::new::<light_year>(val),
+        "pc" | "parsec" | "parsecs" => Length::new::<parsec>(val),
+        "M" | "nautical_mile" | "nautical_miles" => Length::new::<nautical_mile>(val),
+        "micron" | "microns" => Length::new::<micron>(val),
+        "mil" | "mils" => Length::new::<mil>(val),
+        "a₀" | "bohr_radius" | "bohr_radiuses" => Length::new::<bohr_radius>(val),
+        "fermi" | "fermis" => Length::new::<fermi>(val),
+        "Å" => Length::new::<angstrom>(val),
+        "µ" => Length::new::<micron>(val),
+        "μm" | "microinch" | "microinches" => Length::new::<microinch>(val),
+        _ => return None,
+    };
+    Some(l)
 }
 
-fn parse_length_m<'a>(lex: &mut Lexer<'a, Token<'a>>) -> Option<Length> {
-    let slice = lex.slice();
-    let val: f64 = slice[..slice.len() - 1].parse().ok()?;
-    Some(Length::new::<meter>(val))
-}
-
-fn parse_length_um<'a>(lex: &mut Lexer<'a, Token<'a>>) -> Option<Length> {
-    let slice = lex.slice();
-    let val: f64 = slice[..slice.len() - 2].parse().ok()?;
-    Some(Length::new::<micrometer>(val))
-}
-
-fn parse_length_nm<'a>(lex: &mut Lexer<'a, Token<'a>>) -> Option<Length> {
-    let slice = lex.slice();
-    let val: f64 = slice[..slice.len() - 2].parse().ok()?;
-    Some(Length::new::<nanometer>(val))
-}
-
-// Time parsing functions - return uom Time directly
-fn parse_time_s<'a>(lex: &mut Lexer<'a, Token<'a>>) -> Option<Time> {
-    let slice = lex.slice();
-    let val: f64 = slice[..slice.len() - 1].parse().ok()?;
-    Some(Time::new::<second>(val))
-}
-
-fn parse_time_ms<'a>(lex: &mut Lexer<'a, Token<'a>>) -> Option<Time> {
-    let slice = lex.slice();
-    let val: f64 = slice[..slice.len() - 2].parse().ok()?;
-    Some(Time::new::<millisecond>(val))
-}
-
-fn parse_time_us<'a>(lex: &mut Lexer<'a, Token<'a>>) -> Option<Time> {
-    let slice = lex.slice();
-    let val: f64 = slice[..slice.len() - 2].parse().ok()?;
-    Some(Time::new::<microsecond>(val))
-}
-
-fn parse_time_ns<'a>(lex: &mut Lexer<'a, Token<'a>>) -> Option<Time> {
-    let slice = lex.slice();
-    let val: f64 = slice[..slice.len() - 2].parse().ok()?;
-    Some(Time::new::<nanosecond>(val))
-}
-
-fn parse_time_min<'a>(lex: &mut Lexer<'a, Token<'a>>) -> Option<Time> {
-    let slice = lex.slice();
-    let len = if slice.ends_with("mins") { 4 } else { 3 };
-    let val: f64 = slice[..slice.len() - len].parse().ok()?;
-    Some(Time::new::<minute>(val))
-}
-
-fn parse_time_hour<'a>(lex: &mut Lexer<'a, Token<'a>>) -> Option<Time> {
-    let slice = lex.slice();
-    let len = if slice.ends_with("hours") { 5 } else { 4 };
-    let val: f64 = slice[..slice.len() - len].parse().ok()?;
-    Some(Time::new::<hour>(val))
+fn parse_time_prefixed<'a>(lex: &mut Lexer<'a, Token<'a>>) -> Option<Time> {
+    let (val, unit) = split_num_unit(lex.slice())?;
+    let t = match unit {
+        "ys" => Time::new::<yoctosecond>(val),
+        "zs" => Time::new::<zeptosecond>(val),
+        "as" => Time::new::<attosecond>(val),
+        "fs" => Time::new::<femtosecond>(val),
+        "ps" => Time::new::<picosecond>(val),
+        "ns" => Time::new::<nanosecond>(val),
+        "us" | "µs" => Time::new::<microsecond>(val),
+        "ms" => Time::new::<millisecond>(val),
+        "cs" => Time::new::<centisecond>(val),
+        "ds" => Time::new::<decisecond>(val),
+        "s" => Time::new::<second>(val),
+        "das" => Time::new::<decasecond>(val),
+        "hs" => Time::new::<hectosecond>(val),
+        "ks" => Time::new::<kilosecond>(val),
+        "Ms" => Time::new::<megasecond>(val),
+        "Gs" => Time::new::<gigasecond>(val),
+        "Ts" => Time::new::<terasecond>(val),
+        "Ps" => Time::new::<petasecond>(val),
+        "Es" => Time::new::<exasecond>(val),
+        "Zs" => Time::new::<zettasecond>(val),
+        "Ys" => Time::new::<yottasecond>(val),
+        "min" | "minute" | "minutes" => Time::new::<minute>(val),
+        "h" | "hour" | "hours" => Time::new::<hour>(val),
+        "d" | "day" | "days" => Time::new::<day>(val),
+        "a" | "year" | "years" => Time::new::<year>(val),
+        "shake" | "shakes" => Time::new::<shake>(val),
+        "second_sidereal" | "seconds_sidereal" => Time::new::<second_sidereal>(val),
+        "day_sidereal" | "days_sidereal" => Time::new::<day_sidereal>(val),
+        "hour_sidereal" | "hours_sidereal" => Time::new::<hour_sidereal>(val),
+        "year_sidereal" | "years_sidereal" => Time::new::<year_sidereal>(val),
+        "year_tropical" | "years_tropical" => Time::new::<year_tropical>(val),
+        _ => return None,
+    };
+    Some(t)
 }
 
 fn rm_first_and_last<'a>(lex: &mut Lexer<'a, Token<'a>>) -> &'a str {
@@ -227,34 +276,12 @@ enum Token<'a> {
     #[token("false")]
     False,
 
-    // Length tokens - store uom::si::f64::Length directly
-    // Use priority to ensure unit tokens match before plain numbers
-    // Match either integer (no decimal) or float (with decimal and at least one digit after)
-    #[regex(r"[+-]?\d+mm", parse_length_mm, priority = 3)]
-    #[regex(r"[+-]?\d+\.\d+mm", parse_length_mm, priority = 3)]
-    #[regex(r"[+-]?\d+cm", parse_length_cm, priority = 3)]
-    #[regex(r"[+-]?\d+\.\d+cm", parse_length_cm, priority = 3)]
-    #[regex(r"[+-]?\d+um", parse_length_um, priority = 3)]
-    #[regex(r"[+-]?\d+\.\d+um", parse_length_um, priority = 3)]
-    #[regex(r"[+-]?\d+nm", parse_length_nm, priority = 3)]
-    #[regex(r"[+-]?\d+\.\d+nm", parse_length_nm, priority = 3)]
-    #[regex(r"[+-]?\d+m", parse_length_m, priority = 2)]
-    #[regex(r"[+-]?\d+\.\d+m", parse_length_m, priority = 2)]
+    // Length tokens - support all SI prefixes
+    #[regex(r"[+-]?(?:\d+\.\d+|\d+)(?:astronomical_units?|nautical_miles?|light_years?|microinches?|bohr_radiuses?|ångströms?|astronomical_unit|nautical_mile|light_year|microinch|bohr_radius|ångström|angstroms?|angstrom|feet|inches|yards|miles|chains|rods|fathoms?|fermis?|fermi|microns?|micron|mils?|ym|zm|am|fm|pm|nm|um|µm|mm|cm|dm|dam|hm|km|Mm|Gm|Tm|Pm|Em|Zm|Ym|ft|in|mi|yd|ch|rd|ua|au|pc|l\.y\.|Å|µ|μm|m)", parse_length_prefixed, priority = 3)]
     LengthToken(Length),
 
-    // Time tokens - store uom::si::f64::Time directly
-    #[regex(r"[+-]?\d+ms", parse_time_ms, priority = 3)]
-    #[regex(r"[+-]?\d+\.\d+ms", parse_time_ms, priority = 3)]
-    #[regex(r"[+-]?\d+us", parse_time_us, priority = 3)]
-    #[regex(r"[+-]?\d+\.\d+us", parse_time_us, priority = 3)]
-    #[regex(r"[+-]?\d+ns", parse_time_ns, priority = 3)]
-    #[regex(r"[+-]?\d+\.\d+ns", parse_time_ns, priority = 3)]
-    #[regex(r"[+-]?\d+mins?", parse_time_min, priority = 3)]
-    #[regex(r"[+-]?\d+\.\d+mins?", parse_time_min, priority = 3)]
-    #[regex(r"[+-]?\d+hours?", parse_time_hour, priority = 3)]
-    #[regex(r"[+-]?\d+\.\d+hours?", parse_time_hour, priority = 3)]
-    #[regex(r"[+-]?\d+s", parse_time_s, priority = 2)]
-    #[regex(r"[+-]?\d+\.\d+s", parse_time_s, priority = 2)]
+    // Time tokens - support all SI prefixes on seconds plus minute/hour/day/year/shake
+    #[regex(r"[+-]?(?:\d+\.\d+|\d+)(?:shakes?|years?|minutes?|hours?|days?|seconds?_sidereal|days?_sidereal|hours?_sidereal|years?_sidereal|years?_tropical|ys|zs|as|fs|ps|ns|us|µs|ms|cs|ds|s|das|hs|ks|Ms|Gs|Ts|Ps|Es|Zs|Ys|min|h|d|a)", parse_time_prefixed, priority = 3)]
     TimeToken(Time),
 
     #[regex(r"[+-]?\d+\.\d+", |lex| lex.slice().parse().ok())]
@@ -501,6 +528,30 @@ impl Var {
     }
 }
 
+fn format_var(var: &Var) -> String {
+    let mut path = match var {
+        Var::Predef { name: _, namespace } | Var::User { name: _, namespace } => {
+            namespace.join(".")
+        }
+    };
+
+    if !path.is_empty() {
+        path.push('.');
+    }
+
+    match var {
+        Var::Predef { name, .. } => {
+            path.push('_');
+            path.push_str(name);
+        }
+        Var::User { name, .. } => {
+            path.push_str(name);
+        }
+    }
+
+    path
+}
+
 impl FromStr for Var {
     type Err = anyhow::Error;
 
@@ -535,7 +586,7 @@ impl FromStr for Var {
 }
 
 /// The result of compiling and evaluating ratslang code.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Evaluated {
     /// The variable history containing all defined variables and their values.
     pub vars: VariableHistory,
@@ -1085,11 +1136,16 @@ pub fn compile_file_with_state(
 }
 
 /// Tracks the history of variable definitions and provides resolution capabilities.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct VariableHistory {
     ast: Vec<StatementKindOwned>,
     /// Cache of resolved variables for faster lookups.
     pub var_cache: HashMap<Var, Rhs>,
+    usage: Rc<RefCell<UsageStats>>,
+    warn_on_drop: bool,
+    /// The namespace context for this filtered view. When resolving variables,
+    /// this namespace is prepended to variable names.
+    namespace_context: Vec<String>,
 }
 
 fn is_sub_namespace(sub: &[String], super_namespace: &[String]) -> bool {
@@ -1194,6 +1250,26 @@ fn truncate_namespace(ns: &[String], stmt: &StatementKindOwned) -> StatementKind
         }
     }
 }
+#[derive(Debug, Default, Clone)]
+struct UsageStats {
+    assigned: HashSet<Var>,
+    evaluated: HashSet<Var>,
+}
+
+impl UsageStats {
+    fn record_assignment<'a, I>(&mut self, vars: I)
+    where
+        I: IntoIterator<Item = &'a Var>,
+    {
+        for var in vars {
+            self.assigned.insert(var.clone());
+        }
+    }
+
+    fn record_evaluation(&mut self, var: &Var) {
+        self.evaluated.insert(var.clone());
+    }
+}
 
 fn stmt_in_ns(namespace: &[String], stmt: &Statement) -> bool {
     match stmt {
@@ -1213,15 +1289,36 @@ fn stmt_in_ns(namespace: &[String], stmt: &Statement) -> bool {
 impl VariableHistory {
     /// Creates a new variable history from an AST.
     pub fn new(ast: Vec<StatementKindOwned>) -> Self {
+        let mut usage = UsageStats::default();
+        for stmt in ast.iter() {
+            #[allow(irrefutable_let_patterns)]
+            // remove when adding more statments than just variables
+            if let StatementKindOwned::VariableDef(Statement::AssignLeft { lhs, .. }) = stmt {
+                usage.record_assignment(lhs);
+            }
+        }
+
         VariableHistory {
             ast,
             var_cache: HashMap::new(),
+            usage: Rc::new(RefCell::new(usage)),
+            warn_on_drop: true,
+            namespace_context: vec![],
         }
     }
 
     /// Sets the initial variable state, useful for REPL or incremental compilation.
     pub fn with_state(mut self, state: HashMap<Var, Rhs>) -> Self {
         self.var_cache = state;
+        {
+            let mut usage = self.usage.borrow_mut();
+            usage.record_assignment(self.var_cache.keys());
+        }
+        self
+    }
+
+    pub fn with_drop_warning(mut self, warn: bool) -> Self {
+        self.warn_on_drop = warn;
         self
     }
 
@@ -1423,8 +1520,22 @@ impl VariableHistory {
             .into_iter()
             .map(|s| (*s).to_owned())
             .collect::<Vec<_>>();
+        // Truncate namespaces in the filtered AST for easier resolution
         let filtered = self.filter_by_namespace(&owned_ns, None, true);
-        Self::new(filtered)
+
+        // Combine parent namespace context with the filter namespace
+        let mut new_context = self.namespace_context.clone();
+        new_context.extend(owned_ns);
+
+        // Create a new history manually without calling Self::new() to avoid
+        // recording assignments for the truncated namespace variables
+        VariableHistory {
+            ast: filtered,
+            var_cache: HashMap::new(),
+            usage: self.usage.clone(), // Share the same usage stats
+            warn_on_drop: false,       // Don't warn on filtered namespaces
+            namespace_context: new_context,
+        }
     }
 
     /// Resolves a variable by name, returning its value.
@@ -1449,8 +1560,70 @@ impl VariableHistory {
         self.resolve_var(&Var::from_str(var)?)
     }
 
+    /// Records evaluation statistics for a variable without resolving it.
+    ///
+    /// This is useful when a configuration is parsed but you want to mark that
+    /// it has been consulted without actually retrieving the value.
+    pub fn evaluate_stats_only(&self, var: &str) -> anyhow::Result<()> {
+        let parsed = Var::from_str(var)?;
+
+        let full_var = if self.namespace_context.is_empty() {
+            parsed
+        } else {
+            Self::prepend_ns(&parsed, &self.namespace_context)
+        };
+
+        self.usage.borrow_mut().record_evaluation(&full_var);
+        Ok(())
+    }
+
     fn resolve_var(&self, var: &Var) -> anyhow::Result<Option<Rhs>> {
+        let full_var = if self.namespace_context.is_empty() {
+            var.clone()
+        } else {
+            Self::prepend_ns(var, &self.namespace_context)
+        };
+
+        self.usage.borrow_mut().record_evaluation(&full_var);
         self.resolve_recursive(var, None)
+    }
+}
+
+impl VariableHistory {
+    #[cfg(test)]
+    fn usage_counts(&self) -> (usize, usize) {
+        let usage = self.usage.borrow();
+        (usage.assigned.len(), usage.evaluated.len())
+    }
+
+    /// Returns the assigned and evaluated variable names from the configuration.
+    ///
+    /// Useful for build scripts or configuration validation to detect unused variables.
+    pub fn usage_vars(&self) -> (Vec<String>, Vec<String>) {
+        let usage = self.usage.borrow();
+        let mut assigned = usage.assigned.iter().map(format_var).collect::<Vec<_>>();
+        let mut evaluated = usage.evaluated.iter().map(format_var).collect::<Vec<_>>();
+        assigned.sort();
+        evaluated.sort();
+        (assigned, evaluated)
+    }
+}
+
+impl Drop for VariableHistory {
+    fn drop(&mut self) {
+        if !self.warn_on_drop {
+            return;
+        }
+
+        let usage = self.usage.borrow();
+        if usage.assigned.is_empty() && usage.evaluated.is_empty() {
+            log::warn!("Configuration was parsed but never used.");
+            return;
+        }
+
+        for var in usage.assigned.difference(&usage.evaluated) {
+            log::warn!("Variable '{}' was never used.", format_var(var));
+        }
     }
 }
 
@@ -1590,8 +1763,9 @@ pub fn compile_code_with_state(
             // Pass 2 -- needs entire ast for resolving. TODO could still be combined to Pass 1 with a subset of the ast to t-1.
             // Resolve all variables here, else implicit strings in nested assigns are handled as variables.
             // Use the repl state in case the user already run some variables from before which we want to build upon
-            let var_history =
-                VariableHistory::new(ast.clone()).with_state(var_state.clone().unwrap_or_default());
+            let var_history = VariableHistory::new(ast.clone())
+                .with_state(var_state.clone().unwrap_or_default())
+                .with_drop_warning(false);
             for (i, node) in ast.iter_mut().enumerate() {
                 match node {
                     StatementKindOwned::VariableDef(statement) => {
@@ -2251,1368 +2425,4 @@ macro_rules! resolve_path {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    // Local configs helper for tests
-    struct Configs {
-        user: VariableHistory,
-        defaults: VariableHistory,
-    }
-
-    #[test]
-    fn empty() {
-        const SRC: &str = r"";
-        let eval = compile_code(SRC);
-        assert!(eval.is_ok());
-
-        const SRC0: &str = r"
-        ";
-        let eval = compile_code(SRC0);
-        assert!(eval.is_ok());
-
-        const SRC1: &str = r"# blub";
-        let eval = compile_code(SRC1);
-        assert!(eval.is_ok());
-    }
-
-    #[test]
-    fn comments() {
-        const SRC: &str = r"
-        # bla,.
-        # ups /// \masd
-        a = 1 # yo
-        ";
-
-        let eval = compile_code(SRC);
-        assert!(eval.is_ok());
-    }
-
-    #[test]
-    fn var_declare() {
-        const SRC: &str = r"
-         a = 7
-         b = a
-         a = 6
-         _l = /cloud
-        ";
-
-        // let mut a = Token::lexer(SRC);
-        // let b = a.next();
-        // dbg!(b);
-
-        let eval = compile_code(SRC);
-        assert!(eval.is_ok());
-        let eval = eval.unwrap();
-
-        let res = eval.vars.resolve("_l");
-        assert!(res.is_ok());
-        let res = res.unwrap();
-        assert!(res.is_some());
-        let res = res.unwrap();
-        assert_eq!(res, Rhs::Path("/cloud".to_owned()));
-
-        let res = eval.vars.resolve("a");
-        assert!(res.is_ok());
-        let res = res.unwrap();
-        assert!(res.is_some());
-        let res = res.unwrap();
-        assert_eq!(res, Rhs::Val(Val::NumVal(NumVal::Integer(6))));
-
-        let res = eval.vars.resolve("b");
-        assert!(res.is_ok());
-        let res = res.unwrap();
-        assert!(res.is_some());
-        let res = res.unwrap();
-        assert_eq!(res, Rhs::Val(Val::NumVal(NumVal::Integer(7))));
-    }
-
-    #[test]
-    fn var_declare_nested() {
-        const SRC: &str = r"
-         a.b.c = 7
-         a.b = a.b.c
-         a.b.c = 6
-         wind._l = /cloud
-
-         bla, blub = 2, 4
-
-         wal, du = 9
-
-         empty_range = ..
-        ";
-
-        // let mut a = Token::lexer(SRC);
-        // let b = a.next();
-        // dbg!(b);
-
-        let eval = compile_code(SRC);
-        assert!(eval.is_ok());
-        let eval = eval.unwrap();
-
-        let res = eval.vars.resolve("wind._l");
-        assert!(res.is_ok());
-        let res = res.unwrap();
-        assert!(res.is_some());
-        let res = res.unwrap();
-        assert_eq!(res, Rhs::Path("/cloud".to_owned()));
-
-        let res = eval.vars.resolve("a.b.c");
-        assert!(res.is_ok());
-        let res = res.unwrap();
-        assert!(res.is_some());
-        let res = res.unwrap();
-        assert_eq!(res, Rhs::Val(Val::NumVal(NumVal::Integer(6))));
-
-        let res = eval.vars.resolve("a.b");
-        assert!(res.is_ok());
-        let res = res.unwrap();
-        assert!(res.is_some());
-        let res = res.unwrap();
-        assert_eq!(res, Rhs::Val(Val::NumVal(NumVal::Integer(7))));
-
-        let res = eval.vars.resolve("bla");
-        assert!(res.is_ok());
-        let res = res.unwrap();
-        assert!(res.is_some());
-        let res = res.unwrap();
-        assert_eq!(res, Rhs::Val(Val::NumVal(NumVal::Integer(2))));
-
-        let res = eval.vars.resolve("blub");
-        assert!(res.is_ok());
-        let res = res.unwrap();
-        assert!(res.is_some());
-        let res = res.unwrap();
-        assert_eq!(res, Rhs::Val(Val::NumVal(NumVal::Integer(4))));
-
-        let res = eval.vars.resolve("wal");
-        assert!(res.is_ok());
-        let res = res.unwrap();
-        assert!(res.is_some());
-        let res = res.unwrap();
-        assert_eq!(res, Rhs::Val(Val::NumVal(NumVal::Integer(9))));
-
-        let res = eval.vars.resolve("du");
-        assert!(res.is_ok());
-        let res = res.unwrap();
-        assert!(res.is_some());
-        let res = res.unwrap();
-        assert_eq!(res, Rhs::Val(Val::NumVal(NumVal::Integer(9))));
-
-        let res = eval.vars.resolve("empty_range");
-        assert!(res.is_ok());
-        let res = res.unwrap();
-        assert!(res.is_some());
-        let res = res.unwrap();
-        assert_eq!(res, Rhs::EmptyRange);
-    }
-
-    #[test]
-    fn include() {
-        const SRC: &str = r"
-        # like assigning a file to the current namespace
-        = ./test.rl
-
-        # including in namespace blocks will prepend the namespaces to the included AST
-        # (excluding rules, they are always global)
-        c {
-            = ./test.rl
-        }
-        ";
-
-        let eval = compile_code(SRC);
-        assert!(eval.is_ok());
-        let eval = eval.unwrap();
-
-        let res = eval.vars.resolve("test");
-        assert!(res.is_ok());
-        let res = res.unwrap();
-        assert!(res.is_some());
-        let res = res.unwrap();
-        assert_eq!(res, Rhs::Val(Val::NumVal(NumVal::Integer(4))));
-
-        let res = eval.vars.resolve("c.test");
-        assert!(res.is_ok());
-        let res = res.unwrap();
-        assert!(res.is_some());
-        let res = res.unwrap();
-        assert_eq!(res, Rhs::Val(Val::NumVal(NumVal::Integer(4))));
-    }
-
-    #[test]
-    fn var_declare_blocks() {
-        const SRC: &str = r"
-        a {
-            b = 7
-        }
-
-        c {
-            t = 5
-
-            d {
-                o = 1
-            }
-            i = 95
-
-            e.f {
-                bla = 1
-            }
-        }
-        ";
-
-        let eval = compile_code(SRC);
-        assert!(eval.is_ok());
-        let eval = eval.unwrap();
-
-        let res = eval.vars.resolve("a.b");
-        assert!(res.is_ok());
-        let res = res.unwrap();
-        assert!(res.is_some());
-        let res = res.unwrap();
-        assert_eq!(res, Rhs::Val(Val::NumVal(NumVal::Integer(7))));
-
-        let res = eval.vars.resolve("c.t");
-        assert!(res.is_ok());
-        let res = res.unwrap();
-        assert!(res.is_some());
-        let res = res.unwrap();
-        assert_eq!(res, Rhs::Val(Val::NumVal(NumVal::Integer(5))));
-
-        let res = eval.vars.resolve("c.d.o");
-        assert!(res.is_ok());
-        let res = res.unwrap();
-        assert!(res.is_some());
-        let res = res.unwrap();
-        assert_eq!(res, Rhs::Val(Val::NumVal(NumVal::Integer(1))));
-
-        let res = eval.vars.resolve("c.i");
-        assert!(res.is_ok());
-        let res = res.unwrap();
-        assert!(res.is_some());
-        let res = res.unwrap();
-        assert_eq!(res, Rhs::Val(Val::NumVal(NumVal::Integer(95))));
-    }
-
-    #[test]
-    fn in_ns() {
-        // other, me
-        let res = is_sub_namespace(&["a".to_owned()], &["a".to_owned()]); // true
-        assert!(res);
-        let res = is_sub_namespace(&["a".to_owned(), "b".to_owned()], &["a".to_owned()]); // a.b is deeper than a, so a.b can not be a sub namespace. false
-        assert!(!res);
-        let res = is_sub_namespace(&["a".to_owned()], &["a".to_owned(), "b".to_owned()]); // a is in a.b, true
-        assert!(res);
-        let res = is_sub_namespace(&[], &["a".to_owned()]); // empty is not in a.b, false
-        assert!(!res);
-    }
-
-    #[test]
-    fn resolve_ns() {
-        const SRC: &str = r"
-        _bag {
-            lidar {
-                short = l
-                type = Pointcloud2
-            }
-            imu {
-                _short = i
-                _type = Imu
-            }
-        }
-        ";
-
-        let eval = compile_code(SRC);
-        assert!(eval.is_ok());
-        let eval = eval.unwrap();
-        let e = eval.vars.resolve_ns(&["_bag"]);
-        assert_eq!(e.len(), 4);
-    }
-
-    #[test]
-    fn strings() {
-        const SRC: &str = r#"
-        a = "bla with space"
-        b = Blub
-        c = Lidar::Ouster
-            
-        "#;
-
-        let eval = compile_code(SRC);
-        assert!(eval.is_ok());
-        let eval = eval.unwrap();
-
-        let e = eval.vars.resolve("a");
-        assert!(e.is_ok());
-        let e = e.unwrap();
-        assert!(e.is_some());
-        let rhs = e.unwrap();
-        assert_eq!(rhs, Rhs::Val(Val::StringVal("bla with space".to_owned())));
-
-        let e = eval.vars.resolve("b");
-        assert!(e.is_ok());
-        let e = e.unwrap();
-        assert!(e.is_some());
-        let rhs = e.unwrap();
-        assert_eq!(rhs, Rhs::Val(Val::StringVal("Blub".to_owned())));
-
-        let e = eval.vars.resolve("c");
-        assert!(e.is_ok());
-        let e = e.unwrap();
-        assert!(e.is_some());
-        let rhs = e.unwrap();
-        assert_eq!(rhs, Rhs::Val(Val::StringVal("Lidar::Ouster".to_owned())));
-    }
-
-    #[test]
-    fn arrays() {
-        const SRC: &str = r#"
-        a = [ "bla with space", Blub ]
-        "#;
-
-        let eval = compile_code(SRC);
-        assert!(eval.is_ok());
-        let eval = eval.unwrap();
-
-        let e = eval.vars.resolve("a");
-        assert!(e.is_ok());
-        let e = e.unwrap();
-        assert!(e.is_some());
-        let rhs = e.unwrap();
-        assert_eq!(
-            rhs,
-            Rhs::Array(vec![
-                Box::new(Rhs::Val(Val::StringVal("bla with space".to_owned()))),
-                Box::new(Rhs::Val(Val::StringVal("Blub".to_owned()))),
-            ])
-        );
-    }
-
-    #[test]
-    fn unbounded_ranges() {
-        const SRC: &str = r"
-        open_upper = 1..
-        open_lower = ..2
-        open_upper_unit = 3m..
-        open_lower_unit = ..4s
-        empty = ..
-        num_float = 2.2..6.5
-        num_int = -2..6
-        ";
-
-        let eval = compile_code(SRC);
-        assert!(eval.is_ok(), "Failed to compile: {:?}", eval.err());
-        let mut eval = eval.unwrap();
-        eval.vars.populate_cache();
-
-        let res_upper = eval.vars.resolve("open_upper").unwrap().unwrap();
-        assert_eq!(
-            res_upper,
-            Rhs::Range {
-                from: Some(Val::NumVal(NumVal::Integer(1))),
-                to: None
-            }
-        );
-
-        let res_lower = eval.vars.resolve("open_lower").unwrap().unwrap();
-        assert_eq!(
-            res_lower,
-            Rhs::Range {
-                from: None,
-                to: Some(Val::NumVal(NumVal::Integer(2)))
-            }
-        );
-
-        // 3m = 3.0 meters
-        let res_upper_unit = eval.vars.resolve("open_upper_unit").unwrap().unwrap();
-        if let Rhs::Range {
-            from: Some(Val::UnitedVal(uv)),
-            to: None,
-        } = res_upper_unit
-        {
-            assert_eq!(uv.unit(), Unit::Length);
-            assert!(
-                (uv.as_length().unwrap().get::<meter>() - 3.0).abs() < 1e-9,
-                "Expected 3.0 meters, got {}",
-                uv.as_length().unwrap().get::<meter>()
-            );
-        } else {
-            panic!("Expected Range with Length UnitedVal");
-        }
-
-        // 4s = 4.0 seconds
-        let res_lower_unit = eval.vars.resolve("open_lower_unit").unwrap().unwrap();
-        if let Rhs::Range {
-            from: None,
-            to: Some(Val::UnitedVal(uv)),
-        } = res_lower_unit
-        {
-            assert_eq!(uv.unit(), Unit::Time);
-            assert!(
-                (uv.as_time().unwrap().get::<second>() - 4.0).abs() < 1e-9,
-                "Expected 4.0 seconds, got {}",
-                uv.as_time().unwrap().get::<second>()
-            );
-        } else {
-            panic!("Expected Range with Time UnitedVal");
-        }
-
-        let res_empty = eval.vars.resolve("empty").unwrap().unwrap();
-        assert_eq!(res_empty, Rhs::EmptyRange);
-
-        let num_floatrange = eval.vars.resolve("num_float").unwrap().unwrap();
-        assert_eq!(
-            num_floatrange,
-            Rhs::Range {
-                from: Some(Val::NumVal(NumVal::Floating(2.2))),
-                to: Some(Val::NumVal(NumVal::Floating(6.5))),
-            }
-        );
-
-        let num_intrange = eval.vars.resolve("num_int").unwrap().unwrap();
-        assert_eq!(
-            num_intrange,
-            Rhs::Range {
-                from: Some(Val::NumVal(NumVal::Integer(-2))),
-                to: Some(Val::NumVal(NumVal::Integer(6))),
-            }
-        );
-    }
-
-    #[test]
-    fn all() {
-        const SRC: &str = r#"
-        # a comment
-variable = true
-
-time = 1s
-time_is_running = 1ms..2mins # ranges convert automatically
-
-len = 1cm..1m
-
-# _ signals a variable the interpreter is looking for.
-_internal = time_is_running
-
-my.super.long.prefix.var = 0..100 # ranges on namespaced variable "var"
-
-# nested
-my.super {
-
-    long.prefix {
-        next_var = "UTF-🎱 Strings"
-    }
-
-    something_else = -99.018
-}
-
-mat = [ [ 6, 1, 9 ],
-        [ 3, 1, 8 ] ]
-
-        "#;
-        let eval = compile_code(SRC);
-        assert!(eval.is_ok());
-    }
-
-    // #[test]
-    // fn enums() {
-    //     // in your code
-    //     #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
-    //     enum Lidar {
-    //         Ouster,
-    //         Sick,
-    //     }
-
-    //     #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
-
-    #[test]
-    fn error_int_range_with_float_values() {
-        let code = "count = 1.5..2.5";
-        let ast = compile_code(code).unwrap();
-        let configs = Configs {
-            user: ast.vars,
-            defaults: VariableHistory::new(vec![]),
-        };
-        let res =
-            (|| -> anyhow::Result<(i64, i64)> { resolve_int_range!(configs, "count", 0, 10) })();
-        assert!(res.is_err());
-        let msg = format!("{}", res.err().unwrap());
-        assert!(msg.contains("Expected integer value for 'from'"));
-    }
-
-    #[test]
-    fn error_float_range_with_integer_values() {
-        let code = "ratio = 1..2";
-        let ast = compile_code(code).unwrap();
-        let configs = Configs {
-            user: ast.vars,
-            defaults: VariableHistory::new(vec![]),
-        };
-        let res = (|| -> anyhow::Result<(f64, f64)> {
-            resolve_float_range!(configs, "ratio", 0.0, 10.0)
-        })();
-        assert!(res.is_err());
-        let msg = format!("{}", res.err().unwrap());
-        assert!(msg.contains("Expected floating value for 'from'"));
-    }
-
-    #[test]
-    fn error_string_with_bool() {
-        let code = "name = true";
-        let ast = compile_code(code).unwrap();
-        let configs = Configs {
-            user: ast.vars,
-            defaults: VariableHistory::new(vec![]),
-        };
-        let res: anyhow::Result<String> =
-            (|| -> anyhow::Result<String> { resolve_string!(configs, "name") })();
-        assert!(res.is_err());
-        let msg = format!("{}", res.err().unwrap());
-        assert!(msg.contains("Pattern mismatch"));
-    }
-
-    #[test]
-    fn error_path_with_string_val() {
-        let code = "_file = \"/path/to/file\""; // StringVal, not Path
-        let ast = compile_code(code).unwrap();
-        let configs = Configs {
-            user: ast.vars,
-            defaults: VariableHistory::new(vec![]),
-        };
-        let res: anyhow::Result<String> =
-            (|| -> anyhow::Result<String> { resolve_path!(configs, "_file") })();
-        assert!(res.is_err());
-        let msg = format!("{}", res.err().unwrap());
-        assert!(msg.contains("Pattern mismatch"));
-    }
-
-    #[test]
-    fn error_length_range_wrong_unit() {
-        // Provide a united value with incorrect unit (e.g., milliseconds)
-        let code = "distance = 1000ms..2000ms";
-        let ast = compile_code(code).unwrap();
-        let configs = Configs {
-            user: ast.vars,
-            defaults: VariableHistory::new(vec![]),
-        };
-        let res = (|| -> anyhow::Result<(f64, f64)> {
-            resolve_length_range_meters_float!(configs, "distance", 0.5, 10.0)
-        })();
-        assert!(res.is_err());
-        let msg = format!("{}", res.err().unwrap());
-        assert!(msg.contains("Expected a united length value"));
-    }
-
-    #[test]
-    fn error_time_range_non_time_unit() {
-        // Provide a united value with wrong unit (e.g., millimeter)
-        let code = "timeout = 1000mm..2000mm";
-        let ast = compile_code(code).unwrap();
-        let configs = Configs {
-            user: ast.vars,
-            defaults: VariableHistory::new(vec![]),
-        };
-        let res = (|| -> anyhow::Result<(f64, f64)> {
-            resolve_time_range_seconds_float!(configs, "timeout", 0.0, 10.0)
-        })();
-        assert!(res.is_err());
-        let msg = format!("{}", res.err().unwrap());
-        assert!(msg.contains("Expected a united time value"));
-    }
-    //     enum Sensor {
-    //         Lidar(Lidar),
-    //         Imu,
-    //     }
-
-    //     // for rl
-    //     #[derive(Debug)]
-    //     enum Enums {
-    //         Sensor(Sensor),
-    //     }
-    //     let a = Enums::Sensor(Sensor::Lidar(Lidar::Ouster));
-    //     let b = format!("{:?}", a);
-    //     let r = convert_to_path(&b);
-    //     println!("{:?}", r);
-    //     const SRC: &str = "a = Sensor::Lidar";
-
-    // TODO Give Enum to parser function that has all possible variants as trait. so fn variants(self--impl display) -> [impl FromStr]. Then call that in parser and pass type through to AST. If parser finds Sensor type, that has the same name as one of the enums in display. so it calls the parse function on that variant.
-    #[test]
-    fn vec_mat_vals() {
-        const SRC: &str = r"
-        vec = [3, 2, 4]
-
-        mat = [ [3, 1, 1],
-                [3, 2, 4] ]
-        ";
-
-        let eval = compile_code(SRC);
-        assert!(eval.is_ok());
-        let eval = eval.unwrap();
-        let vec = eval.vars.resolve("vec").unwrap().unwrap();
-        assert_eq!(
-            vec,
-            Rhs::Array(vec![
-                Box::new(Rhs::Val(Val::NumVal(NumVal::Integer(3)))),
-                Box::new(Rhs::Val(Val::NumVal(NumVal::Integer(2)))),
-                Box::new(Rhs::Val(Val::NumVal(NumVal::Integer(4)))),
-            ])
-        );
-        let mat = eval.vars.resolve("mat").unwrap().unwrap();
-        assert_eq!(
-            mat,
-            Rhs::Array(vec![
-                Box::new(Rhs::Array(vec![
-                    Box::new(Rhs::Val(Val::NumVal(NumVal::Integer(3)))),
-                    Box::new(Rhs::Val(Val::NumVal(NumVal::Integer(1)))),
-                    Box::new(Rhs::Val(Val::NumVal(NumVal::Integer(1)))),
-                ])),
-                Box::new(Rhs::Array(vec![
-                    Box::new(Rhs::Val(Val::NumVal(NumVal::Integer(3)))),
-                    Box::new(Rhs::Val(Val::NumVal(NumVal::Integer(2)))),
-                    Box::new(Rhs::Val(Val::NumVal(NumVal::Integer(4)))),
-                ])),
-            ])
-        );
-    }
-
-    #[test]
-    fn macro_resolve_length_range_meters_float_defaults() -> anyhow::Result<()> {
-        struct Configs {
-            user: VariableHistory,
-            defaults: VariableHistory,
-        }
-
-        // Test with empty range
-        let code_empty = "distance = ..";
-        let ast = compile_code(code_empty)?;
-        let configs = Configs {
-            user: ast.vars,
-            defaults: VariableHistory::new(vec![]),
-        };
-
-        let (min, max) = resolve_length_range_meters_float!(configs, "distance", 0.5, 10.0)?;
-        assert_eq!(min, 0.5);
-        assert_eq!(max, 10.0);
-
-        // Test with partial lower bound
-        let code_lower = "distance = 2000mm..";
-        let ast = compile_code(code_lower)?;
-        let configs = Configs {
-            user: ast.vars,
-            defaults: VariableHistory::new(vec![]),
-        };
-
-        let (min, max) = resolve_length_range_meters_float!(configs, "distance", 0.0, 15.0)?;
-        assert_eq!(min, 2.0);
-        assert_eq!(max, 15.0);
-
-        // Test with partial upper bound
-        let code_upper = "distance = ..8000mm";
-        let ast = compile_code(code_upper)?;
-        let configs = Configs {
-            user: ast.vars,
-            defaults: VariableHistory::new(vec![]),
-        };
-
-        let (min, max) = resolve_length_range_meters_float!(configs, "distance", 1.0, 20.0)?;
-        assert_eq!(min, 1.0);
-        assert_eq!(max, 8.0);
-
-        Ok(())
-    }
-
-    #[test]
-    fn macro_resolve_float_force_range_defaults() -> anyhow::Result<()> {
-        struct Configs {
-            user: VariableHistory,
-            defaults: VariableHistory,
-        }
-
-        // Test with empty range
-        let code_empty = "range = ..";
-        let ast = compile_code(code_empty)?;
-        let configs = Configs {
-            user: ast.vars,
-            defaults: VariableHistory::new(vec![]),
-        };
-
-        let (min, max) = resolve_float_force_range!(configs, "range", -5.0, 100.0)?;
-        assert_eq!(min, -5.0);
-        assert_eq!(max, 100.0);
-
-        // Test with partial lower bound
-        let code_lower = "range = 25..";
-        let ast = compile_code(code_lower)?;
-        let configs = Configs {
-            user: ast.vars,
-            defaults: VariableHistory::new(vec![]),
-        };
-
-        let (min, max) = resolve_float_force_range!(configs, "range", 0.0, 200.0)?;
-        assert_eq!(min, 25.0);
-        assert_eq!(max, 200.0);
-
-        // Test with partial upper bound
-        let code_upper = "range = ..75";
-        let ast = compile_code(code_upper)?;
-        let configs = Configs {
-            user: ast.vars,
-            defaults: VariableHistory::new(vec![]),
-        };
-
-        let (min, max) = resolve_float_force_range!(configs, "range", 10.0, 150.0)?;
-        assert_eq!(min, 10.0);
-        assert_eq!(max, 75.0);
-
-        Ok(())
-    }
-
-    #[test]
-    fn macro_resolve_float_range_defaults() -> anyhow::Result<()> {
-        struct Configs {
-            user: VariableHistory,
-            defaults: VariableHistory,
-        }
-
-        // Test with empty range
-        let code_empty = "ratio = ..";
-        let ast = compile_code(code_empty)?;
-        let configs = Configs {
-            user: ast.vars,
-            defaults: VariableHistory::new(vec![]),
-        };
-
-        let (min, max) = resolve_float_range!(configs, "ratio", 0.0, 1.0)?;
-        assert_eq!(min, 0.0);
-        assert_eq!(max, 1.0);
-
-        // Test with partial lower bound
-        let code_lower = "ratio = 0.1..";
-        let ast = compile_code(code_lower)?;
-        let configs = Configs {
-            user: ast.vars,
-            defaults: VariableHistory::new(vec![]),
-        };
-
-        let (min, max) = resolve_float_range!(configs, "ratio", 0.0, 1.0)?;
-        assert_eq!(min, 0.1);
-        assert_eq!(max, 1.0);
-
-        // Test with partial upper bound
-        let code_upper = "ratio = ..0.9";
-        let ast = compile_code(code_upper)?;
-        let configs = Configs {
-            user: ast.vars,
-            defaults: VariableHistory::new(vec![]),
-        };
-
-        let (min, max) = resolve_float_range!(configs, "ratio", 0.0, 1.0)?;
-        assert_eq!(min, 0.0);
-        assert_eq!(max, 0.9);
-
-        Ok(())
-    }
-
-    #[test]
-    fn macro_resolve_time_range_seconds_float_defaults() -> anyhow::Result<()> {
-        struct Configs {
-            user: VariableHistory,
-            defaults: VariableHistory,
-        }
-
-        // Test with empty range
-        let code_empty = "timeout = ..";
-        let ast = compile_code(code_empty)?;
-        let configs = Configs {
-            user: ast.vars,
-            defaults: VariableHistory::new(vec![]),
-        };
-
-        let (min, max) = resolve_time_range_seconds_float!(configs, "timeout", 0.5, 10.0)?;
-        assert_eq!(min, 0.5);
-        assert_eq!(max, 10.0);
-
-        // Test with bounded range
-        let code_bounded = "timeout = 1000ms..5s";
-        let ast = compile_code(code_bounded)?;
-        let configs = Configs {
-            user: ast.vars,
-            defaults: VariableHistory::new(vec![]),
-        };
-
-        let (min, max) = resolve_time_range_seconds_float!(configs, "timeout", 0.0, 10.0)?;
-        assert_eq!(min, 1.0);
-        assert_eq!(max, 5.0);
-
-        // Test with partial lower bound
-        let code_lower = "timeout = 2s..";
-        let ast = compile_code(code_lower)?;
-        let configs = Configs {
-            user: ast.vars,
-            defaults: VariableHistory::new(vec![]),
-        };
-
-        let (min, max) = resolve_time_range_seconds_float!(configs, "timeout", 0.0, 15.0)?;
-        assert_eq!(min, 2.0);
-        assert_eq!(max, 15.0);
-
-        Ok(())
-    }
-
-    #[test]
-    fn macro_resolve_int_range_defaults() -> anyhow::Result<()> {
-        struct Configs {
-            user: VariableHistory,
-            defaults: VariableHistory,
-        }
-
-        // Test with empty range
-        let code_empty = "count = ..";
-        let ast = compile_code(code_empty)?;
-        let configs = Configs {
-            user: ast.vars,
-            defaults: VariableHistory::new(vec![]),
-        };
-
-        let (min, max) = resolve_int_range!(configs, "count", 0, 100)?;
-        assert_eq!(min, 0);
-        assert_eq!(max, 100);
-
-        // Test with bounded range
-        let code_bounded = "count = 10..50";
-        let ast = compile_code(code_bounded)?;
-        let configs = Configs {
-            user: ast.vars,
-            defaults: VariableHistory::new(vec![]),
-        };
-
-        let (min, max) = resolve_int_range!(configs, "count", 0, 100)?;
-        assert_eq!(min, 10);
-        assert_eq!(max, 50);
-
-        // Test with partial lower bound
-        let code_lower = "count = 25..";
-        let ast = compile_code(code_lower)?;
-        let configs = Configs {
-            user: ast.vars,
-            defaults: VariableHistory::new(vec![]),
-        };
-
-        let (min, max) = resolve_int_range!(configs, "count", 0, 200)?;
-        assert_eq!(min, 25);
-        assert_eq!(max, 200);
-
-        Ok(())
-    }
-
-    #[test]
-    fn macro_resolve_string() -> anyhow::Result<()> {
-        struct Configs {
-            user: VariableHistory,
-            defaults: VariableHistory,
-        }
-
-        // Test with explicit string
-        let code = "name = \"example\"";
-        let ast = compile_code(code)?;
-        let configs = Configs {
-            user: ast.vars,
-            defaults: VariableHistory::new(vec![]),
-        };
-
-        let name: String = resolve_string!(configs, "name")?;
-        assert_eq!(name, "example");
-
-        // Test with implicit string (identifier)
-        let code_implicit = "type = Lidar";
-        let ast = compile_code(code_implicit)?;
-        let configs = Configs {
-            user: ast.vars,
-            defaults: VariableHistory::new(vec![]),
-        };
-
-        let type_name: String = resolve_string!(configs, "type")?;
-        assert_eq!(type_name, "Lidar");
-
-        Ok(())
-    }
-
-    #[test]
-    fn macro_resolve_bool() -> anyhow::Result<()> {
-        struct Configs {
-            user: VariableHistory,
-            defaults: VariableHistory,
-        }
-
-        // Test with true
-        let code_true = "enabled = true";
-        let ast = compile_code(code_true)?;
-        let configs = Configs {
-            user: ast.vars,
-            defaults: VariableHistory::new(vec![]),
-        };
-
-        let enabled: bool = resolve_bool!(configs, "enabled")?;
-        assert_eq!(enabled, true);
-
-        // Test with false
-        let code_false = "disabled = false";
-        let ast = compile_code(code_false)?;
-        let configs = Configs {
-            user: ast.vars,
-            defaults: VariableHistory::new(vec![]),
-        };
-
-        let disabled: bool = resolve_bool!(configs, "disabled")?;
-        assert_eq!(disabled, false);
-
-        Ok(())
-    }
-
-    #[test]
-    fn macro_resolve_int() -> anyhow::Result<()> {
-        struct Configs {
-            user: VariableHistory,
-            defaults: VariableHistory,
-        }
-
-        // Test with positive integer
-        let code_pos = "count = 42";
-        let ast = compile_code(code_pos)?;
-        let configs = Configs {
-            user: ast.vars,
-            defaults: VariableHistory::new(vec![]),
-        };
-
-        let count: i64 = resolve_int!(configs, "count")?;
-        assert_eq!(count, 42);
-
-        // Test with negative integer
-        let code_neg = "offset = -10";
-        let ast = compile_code(code_neg)?;
-        let configs = Configs {
-            user: ast.vars,
-            defaults: VariableHistory::new(vec![]),
-        };
-
-        let offset: i64 = resolve_int!(configs, "offset")?;
-        assert_eq!(offset, -10);
-
-        Ok(())
-    }
-
-    #[test]
-    fn macro_resolve_float() -> anyhow::Result<()> {
-        struct Configs {
-            user: VariableHistory,
-            defaults: VariableHistory,
-        }
-
-        // Test with explicit float
-        let code_float = "ratio = 3.14";
-        let ast = compile_code(code_float)?;
-        let configs = Configs {
-            user: ast.vars,
-            defaults: VariableHistory::new(vec![]),
-        };
-
-        let ratio: f64 = resolve_float!(configs, "ratio")?;
-        assert_eq!(ratio, 3.14);
-
-        // Test with integer that gets converted to float
-        let code_int = "count = 42";
-        let ast = compile_code(code_int)?;
-        let configs = Configs {
-            user: ast.vars,
-            defaults: VariableHistory::new(vec![]),
-        };
-
-        let count: f64 = resolve_float!(configs, "count")?;
-        assert_eq!(count, 42.0);
-
-        Ok(())
-    }
-
-    #[test]
-    fn macro_resolve_path() -> anyhow::Result<()> {
-        struct Configs {
-            user: VariableHistory,
-            defaults: VariableHistory,
-        }
-
-        // Test with absolute path
-        let code = "_file = /path/to/file";
-        let ast = compile_code(code)?;
-        let configs = Configs {
-            user: ast.vars,
-            defaults: VariableHistory::new(vec![]),
-        };
-
-        let path: String = resolve_path!(configs, "_file")?;
-        assert_eq!(path, "/path/to/file");
-
-        // Test with relative path
-        let code_rel = "_config = ./config.toml";
-        let ast = compile_code(code_rel)?;
-        let configs = Configs {
-            user: ast.vars,
-            defaults: VariableHistory::new(vec![]),
-        };
-
-        let config_path: String = resolve_path!(configs, "_config")?;
-        assert_eq!(config_path, "./config.toml");
-
-        Ok(())
-    }
-
-    #[test]
-    fn macro_fallback_to_defaults() -> anyhow::Result<()> {
-        struct Configs {
-            user: VariableHistory,
-            defaults: VariableHistory,
-        }
-
-        // Test that macros fall back to defaults when not in user config
-        let user_code = "enabled = true";
-        let default_code = "count = 100\nname = \"default\"";
-
-        let user_ast = compile_code(user_code)?;
-        let default_ast = compile_code(default_code)?;
-
-        let configs = Configs {
-            user: user_ast.vars,
-            defaults: default_ast.vars,
-        };
-
-        // This should come from user config
-        let enabled: bool = resolve_bool!(configs, "enabled")?;
-        assert_eq!(enabled, true);
-
-        // These should come from default config
-        let count: i64 = resolve_int!(configs, "count")?;
-        assert_eq!(count, 100);
-
-        let name: String = resolve_string!(configs, "name")?;
-        assert_eq!(name, "default");
-
-        Ok(())
-    }
-
-    #[test]
-    fn error_variable_not_found_message() {
-        // No variables defined; attempt to resolve a missing one
-        let ast = compile_code("").unwrap();
-        let defaults = VariableHistory::new(vec![]);
-        let configs = Configs {
-            user: ast.vars,
-            defaults,
-        };
-
-        // Use identifier form to validate the exact error message path
-        let res: anyhow::Result<i64> = (|| -> anyhow::Result<i64> {
-            resolve_var!(configs, missing_var, as i64,
-                Rhs::Val(Val::NumVal(NumVal::Integer(i))) => { i }
-            )
-        })();
-
-        assert!(res.is_err());
-        let msg = format!("{}", res.err().unwrap());
-        assert!(msg.contains("Required variable 'missing_var' not found in any configuration."));
-    }
-
-    #[test]
-    fn micrometer_units() {
-        const SRC: &str = r"
-        micro_int = 1000um
-        micro_float = 1.5um
-        nano_int = 1000000nm
-        nano_float = 1.5nm
-        range_micro = 500um..1000um
-        ";
-
-        let eval = compile_code(SRC);
-        assert!(eval.is_ok(), "Failed to compile: {:?}", eval.err());
-        let eval = eval.unwrap();
-
-        // 1000um = 1mm = 0.001m (exact with uom)
-        let micro_int = eval.vars.resolve("micro_int").unwrap().unwrap();
-        if let Rhs::Val(Val::UnitedVal(uv)) = micro_int {
-            assert_eq!(uv.unit(), Unit::Length);
-            assert!(
-                (uv.as_length().unwrap().get::<micrometer>() - 1000.0).abs() < 1e-9,
-                "Expected 1000 micrometers, got {}",
-                uv.as_length().unwrap().get::<micrometer>()
-            );
-            assert!(
-                (uv.as_length().unwrap().get::<millimeter>() - 1.0).abs() < 1e-9,
-                "Expected 1 mm, got {}",
-                uv.as_length().unwrap().get::<millimeter>()
-            );
-        } else {
-            panic!("Expected UnitedVal");
-        }
-
-        // 1.5um preserved exactly (no rounding!)
-        let micro_float = eval.vars.resolve("micro_float").unwrap().unwrap();
-        if let Rhs::Val(Val::UnitedVal(uv)) = micro_float {
-            assert_eq!(uv.unit(), Unit::Length);
-            assert!(
-                (uv.as_length().unwrap().get::<micrometer>() - 1.5).abs() < 1e-9,
-                "Expected 1.5 micrometers, got {}",
-                uv.as_length().unwrap().get::<micrometer>()
-            );
-        } else {
-            panic!("Expected UnitedVal");
-        }
-
-        // 1000000nm = 1mm = 0.001m (exact with uom)
-        let nano_int = eval.vars.resolve("nano_int").unwrap().unwrap();
-        if let Rhs::Val(Val::UnitedVal(uv)) = nano_int {
-            assert_eq!(uv.unit(), Unit::Length);
-            assert!(
-                (uv.as_length().unwrap().get::<nanometer>() - 1_000_000.0).abs() < 1e-6,
-                "Expected 1000000 nanometers, got {}",
-                uv.as_length().unwrap().get::<nanometer>()
-            );
-            assert!(
-                (uv.as_length().unwrap().get::<millimeter>() - 1.0).abs() < 1e-9,
-                "Expected 1 mm, got {}",
-                uv.as_length().unwrap().get::<millimeter>()
-            );
-        } else {
-            panic!("Expected UnitedVal");
-        }
-
-        // 1.5nm preserved exactly (no rounding!)
-        let nano_float = eval.vars.resolve("nano_float").unwrap().unwrap();
-        if let Rhs::Val(Val::UnitedVal(uv)) = nano_float {
-            assert_eq!(uv.unit(), Unit::Length);
-            assert!(
-                (uv.as_length().unwrap().get::<nanometer>() - 1.5).abs() < 1e-9,
-                "Expected 1.5 nanometers, got {}",
-                uv.as_length().unwrap().get::<nanometer>()
-            );
-        } else {
-            panic!("Expected UnitedVal");
-        }
-
-        // Range: 500um..1000um preserved exactly
-        let range_micro = eval.vars.resolve("range_micro").unwrap().unwrap();
-        if let Rhs::Range {
-            from: Some(Val::UnitedVal(from_uv)),
-            to: Some(Val::UnitedVal(to_uv)),
-        } = range_micro
-        {
-            assert!(
-                (from_uv.as_length().unwrap().get::<micrometer>() - 500.0).abs() < 1e-9,
-                "Expected 500 um, got {}",
-                from_uv.as_length().unwrap().get::<micrometer>()
-            );
-            assert!(
-                (to_uv.as_length().unwrap().get::<micrometer>() - 1000.0).abs() < 1e-9,
-                "Expected 1000 um, got {}",
-                to_uv.as_length().unwrap().get::<micrometer>()
-            );
-        } else {
-            panic!("Expected Range with UnitedVal bounds");
-        }
-    }
-
-    #[test]
-    fn microsecond_units() {
-        const SRC: &str = r"
-        micro_int = 1000us
-        micro_float = 1.5us
-        nano_int = 1000000ns
-        nano_float = 1.5ns
-        range_micro = 500us..1000us
-        ";
-
-        let eval = compile_code(SRC);
-        assert!(eval.is_ok(), "Failed to compile: {:?}", eval.err());
-        let eval = eval.unwrap();
-
-        // 1000us = 1ms = 0.001s (exact with uom)
-        let micro_int = eval.vars.resolve("micro_int").unwrap().unwrap();
-        if let Rhs::Val(Val::UnitedVal(uv)) = micro_int {
-            assert_eq!(uv.unit(), Unit::Time);
-            assert!(
-                (uv.as_time().unwrap().get::<microsecond>() - 1000.0).abs() < 1e-9,
-                "Expected 1000 microseconds, got {}",
-                uv.as_time().unwrap().get::<microsecond>()
-            );
-            assert!(
-                (uv.as_time().unwrap().get::<millisecond>() - 1.0).abs() < 1e-9,
-                "Expected 1 ms, got {}",
-                uv.as_time().unwrap().get::<millisecond>()
-            );
-        } else {
-            panic!("Expected UnitedVal");
-        }
-
-        // 1.5us preserved exactly (no rounding!)
-        let micro_float = eval.vars.resolve("micro_float").unwrap().unwrap();
-        if let Rhs::Val(Val::UnitedVal(uv)) = micro_float {
-            assert_eq!(uv.unit(), Unit::Time);
-            assert!(
-                (uv.as_time().unwrap().get::<microsecond>() - 1.5).abs() < 1e-9,
-                "Expected 1.5 microseconds, got {}",
-                uv.as_time().unwrap().get::<microsecond>()
-            );
-        } else {
-            panic!("Expected UnitedVal");
-        }
-
-        // 1000000ns = 1ms = 0.001s (exact with uom)
-        let nano_int = eval.vars.resolve("nano_int").unwrap().unwrap();
-        if let Rhs::Val(Val::UnitedVal(uv)) = nano_int {
-            assert_eq!(uv.unit(), Unit::Time);
-            assert!(
-                (uv.as_time().unwrap().get::<nanosecond>() - 1_000_000.0).abs() < 1e-3,
-                "Expected 1000000 nanoseconds, got {}",
-                uv.as_time().unwrap().get::<nanosecond>()
-            );
-            assert!(
-                (uv.as_time().unwrap().get::<millisecond>() - 1.0).abs() < 1e-9,
-                "Expected 1 ms, got {}",
-                uv.as_time().unwrap().get::<millisecond>()
-            );
-        } else {
-            panic!("Expected UnitedVal");
-        }
-
-        // 1.5ns preserved exactly (no rounding!)
-        let nano_float = eval.vars.resolve("nano_float").unwrap().unwrap();
-        if let Rhs::Val(Val::UnitedVal(uv)) = nano_float {
-            assert_eq!(uv.unit(), Unit::Time);
-            assert!(
-                (uv.as_time().unwrap().get::<nanosecond>() - 1.5).abs() < 1e-9,
-                "Expected 1.5 nanoseconds, got {}",
-                uv.as_time().unwrap().get::<nanosecond>()
-            );
-        } else {
-            panic!("Expected UnitedVal");
-        }
-
-        // Range: 500us..1000us preserved exactly
-        let range_micro = eval.vars.resolve("range_micro").unwrap().unwrap();
-        if let Rhs::Range {
-            from: Some(Val::UnitedVal(from_uv)),
-            to: Some(Val::UnitedVal(to_uv)),
-        } = range_micro
-        {
-            assert!(
-                (from_uv.as_time().unwrap().get::<microsecond>() - 500.0).abs() < 1e-9,
-                "Expected 500 us, got {}",
-                from_uv.as_time().unwrap().get::<microsecond>()
-            );
-            assert!(
-                (to_uv.as_time().unwrap().get::<microsecond>() - 1000.0).abs() < 1e-9,
-                "Expected 1000 us, got {}",
-                to_uv.as_time().unwrap().get::<microsecond>()
-            );
-        } else {
-            panic!("Expected Range with UnitedVal bounds");
-        }
-    }
-
-    #[test]
-    fn accuracy_conversions_no_rounding() {
-        // Test that uom preserves precision - NO ROUNDING anymore!
-        const SRC: &str = r"
-        um_500 = 500um
-        nm_1 = 1nm
-        us_500 = 500us
-        ns_1 = 1ns
-        um_999999 = 999999um
-        us_999999 = 999999us
-        ";
-
-        let eval = compile_code(SRC).expect("Failed to compile");
-
-        // 500um = 0.5mm exactly
-        if let Rhs::Val(Val::UnitedVal(uv)) = eval.vars.resolve("um_500").unwrap().unwrap() {
-            assert!((uv.as_length().unwrap().get::<micrometer>() - 500.0).abs() < 1e-9);
-            assert!((uv.as_length().unwrap().get::<millimeter>() - 0.5).abs() < 1e-9);
-        } else {
-            panic!("Expected UnitedVal");
-        }
-
-        // 1nm = 0.000001mm exactly
-        if let Rhs::Val(Val::UnitedVal(uv)) = eval.vars.resolve("nm_1").unwrap().unwrap() {
-            assert!((uv.as_length().unwrap().get::<nanometer>() - 1.0).abs() < 1e-9);
-            assert!((uv.as_length().unwrap().get::<millimeter>() - 0.000001).abs() < 1e-12);
-        } else {
-            panic!("Expected UnitedVal");
-        }
-
-        // 500us = 0.5ms exactly
-        if let Rhs::Val(Val::UnitedVal(uv)) = eval.vars.resolve("us_500").unwrap().unwrap() {
-            assert!((uv.as_time().unwrap().get::<microsecond>() - 500.0).abs() < 1e-9);
-            assert!((uv.as_time().unwrap().get::<millisecond>() - 0.5).abs() < 1e-9);
-        } else {
-            panic!("Expected UnitedVal");
-        }
-
-        // 1ns = 0.000001ms exactly
-        if let Rhs::Val(Val::UnitedVal(uv)) = eval.vars.resolve("ns_1").unwrap().unwrap() {
-            assert!((uv.as_time().unwrap().get::<nanosecond>() - 1.0).abs() < 1e-9);
-            assert!((uv.as_time().unwrap().get::<millisecond>() - 0.000001).abs() < 1e-12);
-        } else {
-            panic!("Expected UnitedVal");
-        }
-
-        // 999999um = 999.999mm exactly
-        if let Rhs::Val(Val::UnitedVal(uv)) = eval.vars.resolve("um_999999").unwrap().unwrap() {
-            assert!((uv.as_length().unwrap().get::<micrometer>() - 999999.0).abs() < 1e-6);
-            assert!((uv.as_length().unwrap().get::<millimeter>() - 999.999).abs() < 1e-9);
-        } else {
-            panic!("Expected UnitedVal");
-        }
-
-        // 999999us = 999.999ms exactly
-        if let Rhs::Val(Val::UnitedVal(uv)) = eval.vars.resolve("us_999999").unwrap().unwrap() {
-            assert!((uv.as_time().unwrap().get::<microsecond>() - 999999.0).abs() < 1e-6);
-            assert!((uv.as_time().unwrap().get::<millisecond>() - 999.999).abs() < 1e-9);
-        } else {
-            panic!("Expected UnitedVal");
-        }
-    }
-
-    #[test]
-    fn accuracy_large_values_floating_point_precision() {
-        // Test large values - f64 has about 15-17 significant decimal digits
-        const SRC: &str = r"
-        large_um = 123456789012um
-        large_ns = 123456789012345ns
-        ";
-
-        let eval = compile_code(SRC).expect("Failed to compile");
-
-        // 123456789012um = 123456.789012m
-        if let Rhs::Val(Val::UnitedVal(uv)) = eval.vars.resolve("large_um").unwrap().unwrap() {
-            let expected_meters = 123456.789012;
-            let tolerance = expected_meters * 1e-12;
-            assert!(
-                (uv.as_length().unwrap().get::<meter>() - expected_meters).abs() < tolerance,
-                "large_um: expected {} m, got {} m",
-                expected_meters,
-                uv.as_length().unwrap().get::<meter>()
-            );
-        } else {
-            panic!("Expected UnitedVal");
-        }
-
-        // 123456789012345ns = 123456.789012345s (ns to s: divide by 10^9)
-        if let Rhs::Val(Val::UnitedVal(uv)) = eval.vars.resolve("large_ns").unwrap().unwrap() {
-            let expected_seconds = 123456.789012345;
-            let tolerance = expected_seconds * 1e-10;
-            assert!(
-                (uv.as_time().unwrap().get::<second>() - expected_seconds).abs() < tolerance,
-                "large_ns: expected {} s, got {} s",
-                expected_seconds,
-                uv.as_time().unwrap().get::<second>()
-            );
-        } else {
-            panic!("Expected UnitedVal");
-        }
-    }
-}
+mod tests;

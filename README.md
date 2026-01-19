@@ -23,7 +23,7 @@ Let's take a look at how it works:
 variable = true
 
 time = 1s
-time_is_running = 1ms..2mins # ranges convert automatically
+time_is_running = 1ms..2min # ranges convert automatically
 
 # nanometers and micrometers for precision work
 precision_length = 500nm..10um
@@ -71,20 +71,24 @@ Currently, Ratslang doesn't support expressions like arithmetic, loops, or condi
 * **Path**: Example: `./somewhere/relative.dat`, `/or/absolute`, `./../backneed/dotfirst.launch.py`
 * **Array/Matrix**: Newlines after commas are also supported for readability. `[ <Type>, <Type>, ... ]`, `[ 42, World, [ "nested" ] ]`, `[ [ 1, 2, 3 ], [ 4, 5, 6 ] ]`
 * **Time** (stored as `uom::si::f64::Time`):
-    * **Hour**: `hour`, `hours` (`s` is optional). Example: `2hours`, `1.5hour`
-    * **Minute**: `min`, `mins` (`s` is optional). Example: `30min`, `5mins`
-    * **Second**: `s`. Example: `10s`, `0.5s`
-    * **Millisecond**: `ms`. Example: `200ms`, `1ms`
-    * **Microsecond**: `us`. Example: `500us`, `1.5us`
-    * **Nanosecond**: `ns`. Example: `100ns`, `1ns`
+    * **Second** with SI prefixes: `ys` through `Ys` (e.g., `10s`, `0.5s`, `1ms`, `2ks`)
+    * **Hour**: `h`, `hour`, `hours`. Example: `2h`, `1.5hour`
+    * **Minute**: `min`, `minute`, `minutes`. Example: `30min`, `5minutes`
+    * **Year**: `a`, `year`, `years`. Example: `1a`, `2.5years`
+    * **Day**: `d`, `day`, `days`. Example: `7d`, `1.5days`
+    * **Shake**: `shake`, `shakes`. Example: `10shake`
+    * **Sidereal variants** (astronomical): `second_sidereal`, `hour_sidereal`, `day_sidereal`, `year_sidereal`. Example: `1day_sidereal`, `23.5hours_sidereal`
+    * **Tropical year**: `year_tropical`, `years_tropical`. Example: `1year_tropical`
 * **Length** (stored as `uom::si::f64::Length`):
-    * **Meter**: `m`. Example: `10m`, `0.5m`
-    * **Centimeter**: `cm`. Example: `50cm`, `2.5cm`
-    * **Millimeter**: `mm`. Example: `100mm`, `1mm`
-    * **Micrometer**: `um`. Example: `500um`, `1.5um`
-    * **Nanometer**: `nm`. Example: `100nm`, `1nm`
+    * **Meter** with SI prefixes: `ym` through `Ym` (e.g., `10m`, `0.5m`, `1mm`, `2km`)
+    * **Imperial/US**: `ft`/`foot`, `in`/`inch`, `mi`/`mile`, `yd`/`yard`. Example: `5ft`, `12inches`, `3.5miles`
+    * **Other common**: `ch`/`chain`, `rd`/`rod`, `fathom`. Example: `1fathom`, `2chains`
+    * **Astronomical**: `ua`/`astronomical_unit`, `light_year`, `parsec` (or `l.y.`, `pc`). Example: `1.5au`, `4.37light_years`
+    * **Nautical**: `M`/`nautical_mile`. Example: `10nautical_miles`
+    * **Small units**: `angstrom` (or `Å`), `micron` (or `µ`), `mil`, `microinch`. Example: `10angstrom`, `0.5microns`
+    * **Atomic**: `bohr_radius` (or `a₀`), `fermi`. Example: `1bohr_radius`
 * **Range**: Including unbound variants and empty `..`.
-    * **Time**: Example: `1ms..5.3hours`, `6s..`
+    * **Time**: Example: `1ms..5.3h`, `6s..`, `30min..2d`
     * **Length**: Example: `1mm..100m`, `..4m`
     * **Numbers**: Example: `-4..l`, `6.00001..6.0001`
 
