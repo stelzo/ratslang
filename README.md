@@ -177,7 +177,7 @@ Add this to your `Cargo.toml`.
 
 ~~~toml
 [dependencies]
-ratslang = "0.3.1"
+ratslang = "0.4.0"
 ~~~
 
 First, you compile a Ratslang file to get a cleaned Abstract Syntax Tree (AST) with all variables resolved.
