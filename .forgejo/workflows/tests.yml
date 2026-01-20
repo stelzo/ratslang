@@ -13,12 +13,10 @@ jobs:
   build:
 
     runs-on: codeberg-small
+    image: rust
 
     steps:
     - uses: actions/checkout@v4
-    - uses: wackbyte/rust-toolchain@trunk
-      with:
-        toolchain: stable
     - name: Build
       run: cargo build
     - name: Run tests
