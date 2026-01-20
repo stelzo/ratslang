@@ -22,9 +22,12 @@ jobs:
         echo "source $HOME/.cargo/env" >> .bashrc
         source $HOME/.cargo/env
         rustup default stable
-        cargo install cargo-msrv
         apt-get update
         apt-get install -y build-essential
+    - name: Install cargo-msrv
+      run: |
+        curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
+        cargo binstall cargo-msrv --no-confirm
     - name: Build
       run: cargo build
     - name: Run tests
