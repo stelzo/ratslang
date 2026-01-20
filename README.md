@@ -108,13 +108,76 @@ strangefile {
 
 ---
 
+## Annotations
+
+Annotations allow you to mark sections of your configuration for selective extraction and filtering. This is particularly useful for generating minimal configurations, feature-specific settings, or environment-dependent parameters.
+
+### Basic Usage
+
+Annotate a single line with `# @annotation_name`:
+
+~~~awk
+# @minimal
+timeout = 5000
+
+# @dev
+debug_enabled = true
+
+production_only = false
+~~~
+
+Annotate an entire namespace block:
+
+~~~awk
+# @minimal
+sensor {
+    type = Lidar
+    range = 100m
+}
+
+sensor.calibration_file = /path/to/calibration.dat
+~~~
+
+### Extracting Annotations
+
+Use `to_string_filtered()` to extract only annotated sections:
+
+~~~rust
+use ratslang::compile_code;
+
+let source = r#"
+    # @minimal
+    timeout = 5000
+    
+    # @minimal
+    sensor {
+        type = Lidar
+    }
+    
+    sensor.range = 100m
+"#;
+
+let ast = compile_code(source).unwrap();
+let minimal_config = ast.to_string_filtered("minimal").unwrap();
+// Result: only timeout and sensor block
+~~~
+
+### Use Cases
+
+- **Minimal configurations:** Use `@minimal` to generate deployment-ready configs with only essential parameters
+- **Feature flags:** Use `@feature_name` to extract configurations for specific features  
+- **Environment-specific settings:** Use `@prod`, `@dev`, `@test` for environment variants
+- **Documentation examples:** Use `@documented` to generate user-facing configuration examples
+
+---
+
 ## Library Usage
 
 Add this to your `Cargo.toml`.
 
 ~~~toml
 [dependencies]
-ratslang = "0.2.0"
+ratslang = "0.3.1"
 ~~~
 
 First, you compile a Ratslang file to get a cleaned Abstract Syntax Tree (AST) with all variables resolved.

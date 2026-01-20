@@ -3,7 +3,7 @@ robot {
         lidar_range = 10m..50m
         lidar_range_feet = 30ft..150ft
         lidar_range_km = 0.01km..0.05km
-        camera_fov = 60degrees
+        precision_distance = 1micron
     }
     
     navigation {

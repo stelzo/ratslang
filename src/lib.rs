@@ -8,11 +8,12 @@
 //!
 //! ## Features
 //!
-//! - **Time units:** `ns`, `us`, `ms`, `s`, `min`, `h`, `d`, `a` (year), `shake` (and SI prefixes, stored as `uom::si::f64::Time`)
-//! - **Length units:** `nm`, `um`, `mm`, `cm`, `m` (stored as `uom::si::f64::Length`)
+//! - **Time units:** `ns`, `us`, `ms`, `s`, `min`, `h`, `d`, `a` (year), `shake` (and SI prefixes, see [Supported Time Units](#supported-time-units))
+//! - **Length units:** `nm`, `um`, `mm`, `cm`, `m` (see [Supported Length Units](#supported-length-units))
 //! - **Ranges:** `1mm..100m`, `5s..`, `..10m`, `..`
 //! - **Namespaces:** Dot notation (`sensor.range`) or blocks
 //! - **Includes:** Compose configuration files with namespace scoping
+//! - **Annotations:** Mark configuration sections with `# @annotation_name` for selective filtering and extraction
 //! - **Types:** Booleans, integers, floats, strings, paths, arrays
 //! - **Type-safe units:** Values stored directly as `uom` types - no conversion or rounding
 //!
@@ -68,6 +69,122 @@
 //! ## Syntax Highlighting
 //!
 //! Syntax highlighting is available with [this tree-sitter grammar](https://github.com/stelzo/tree-sitter-ratslang) or [this VS Code extension](https://marketplace.visualstudio.com/items?itemName=stelzo.ratslang).
+//!
+//! ## Annotations
+//!
+//! Annotations allow you to mark sections of configuration for selective extraction and filtering.
+//! Use `# @annotation_name` to mark lines or entire blocks that you want to extract later.
+//!
+//! ### Syntax
+//!
+//! Annotate a single line:
+//! ```ignore
+//! # @minimal
+//! timeout = 5000
+//! ```
+//!
+//! Annotate an entire namespace block:
+//! ```ignore
+//! # @minimal
+//! sensor {
+//!     type = Lidar
+//!     range = 100m
+//! }
+//! ```
+//!
+//! ### Usage
+//!
+//! Extract annotated configuration (see also: [crate::VariableHistory::to_string_filtered]):
+//!
+//! ```no_run
+//! use ratslang::compile_code;
+//!
+//! let source = r#"
+//! # @minimal
+//! timeout = 5000
+//!
+//! # @minimal
+//! sensor {
+//!     type = Lidar
+//! }
+//!
+//! sensor.range = 100m
+//! "#;
+//!
+//! let ast = compile_code(source).unwrap();
+//! let minimal_config = ast.to_string_filtered("minimal").unwrap();
+//! println!("{}", minimal_config);
+//! ```
+//!
+//! ### Use Cases
+//!
+//! - **Minimal configurations:** Mark only essential parameters with `@minimal` for deployment or documentation
+//! - **Feature flags:** Use `@feature_name` to extract configurations for specific features
+//! - **Environment-specific:** Use `@prod`, `@dev`, `@test` for environment-specific settings
+//! - **Documentation:** Mark parameters with `@documented` for user-facing config examples
+//!
+//! ## Supported Time Units
+//!
+//! ### Base Units
+//!
+//! - **SI Prefixes:** `fs` (femto), `ps` (pico), `ns` (nano), `us` (micro), `ms` (milli), `s` (second),
+//!   `min` (minute), `h` (hour), `d` (day), `ks` (kilo)
+//!
+//! ### Common Units
+//!
+//! - `s` – second (base unit)
+//! - `min` – minute (60 seconds)
+//! - `h` – hour (3600 seconds)
+//! - `d` – day (86400 seconds)
+//!
+//! ### Astronomical and Special Units
+//!
+//! - `a` – year (365.25 days, Julian year)
+//! - `shake` – 10 nanoseconds (unit used in nuclear physics)
+//! - `sidereal_year` – sidereal year (365.256363004 days)
+//! - `tropical_year` – tropical year (365.242190402 days)
+//!
+//! ### Notes
+//!
+//! - SI prefixes combine with base units: `ms`, `us`, `ns`, `ps`, `fs`
+//! - All time values are stored internally as `uom::si::f64::Time` with no conversion loss
+//! - Ranges work with all time units: `100ms..5s`, `1h..`, `..30s`
+//!
+//! ## Supported Length Units
+//!
+//! ### SI Prefixes
+//!
+//! - `pm` (pico), `nm` (nano), `um` (micro), `mm` (milli), `cm` (centi), `m` (meter),
+//!   `km` (kilo), `Mm` (mega), `Gm` (giga), `Tm` (tera), `Pm` (peta), `Em` (exa), `Zm` (zetta), `Ym` (yotta)
+//!
+//! ### Imperial Units
+//!
+//! - `in` or `inch` – inch (25.4 mm)
+//! - `ft` or `foot` – foot (304.8 mm)
+//! - `yd` or `yard` – yard (914.4 mm)
+//! - `mi` or `mile` – mile (1609.344 m)
+//!
+//! ### Astronomical Units
+//!
+//! - `au` or `AU` – astronomical unit (~149.6 million km)
+//! - `ly` or `light_year` – light-year (~9.46 trillion km)
+//! - `pc` or `parsec` – parsec (~30.86 trillion km)
+//!
+//! ### Nautical Units
+//!
+//! - `nmi` or `nautical_mile` – nautical mile (1852 m)
+//! - `fathom` – fathom (1.8288 m, nautical depth measurement)
+//!
+//! ### Small Units
+//!
+//! - `angstrom` – 10^-10 meters (used in atomic physics and chemistry)
+//! - `bohr_radius` – Bohr radius (~0.529 Ångströms, atomic unit)
+//! - `fermi` – femtometer (10^-15 m, nuclear unit)
+//!
+//! ### Notes
+//!
+//! - Ranges work with all length units: `1mm..100m`, `5ft..`, `..10mi`
+//! - Mixed units in expressions are not supported; each value must use consistent units
 
 use core::fmt;
 use std::{
@@ -212,6 +329,7 @@ fn rm_first_and_last<'a>(lex: &mut Lexer<'a, Token<'a>>) -> &'a str {
 
 #[derive(Logos, Debug, PartialEq, Clone)]
 #[logos(skip r"[ \t\f\r]+")]
+#[logos(skip r"ł(?:@[a-zA-Z_]+)?")]
 enum Token<'a> {
     Error,
 
@@ -590,6 +708,10 @@ impl FromStr for Var {
 pub struct Evaluated {
     /// The variable history containing all defined variables and their values.
     pub vars: VariableHistory,
+    /// Original source code for comment-preserving filtering
+    pub source_text: String,
+    /// Maps annotation names to line ranges (0-indexed, inclusive)
+    pub annotations: HashMap<String, Vec<(usize, usize)>>,
 }
 
 impl Evaluated {
@@ -597,7 +719,222 @@ impl Evaluated {
     pub fn new() -> Self {
         Self {
             vars: VariableHistory::new(vec![]),
+            source_text: String::new(),
+            annotations: HashMap::new(),
         }
+    }
+
+    /// Filters the configuration to include only statements with a specific annotation,
+    /// preserving all comments and namespace context. Returns a string representation of the filtered config.
+    ///
+    /// Returns a string containing the filtered configuration with comments preserved, or None if annotation not found.
+    pub fn to_string_filtered(&self, annotation: &str) -> Option<String> {
+        self.annotations.get(annotation).map(|line_ranges| {
+            let lines: Vec<&str> = self.source_text.lines().collect();
+
+            // Precompute namespace stack per line
+            let mut ns_stack: Vec<String> = Vec::new();
+            let mut ns_for_line: Vec<Vec<String>> = Vec::with_capacity(lines.len());
+            for line in &lines {
+                let trimmed = line.trim();
+
+                if trimmed.starts_with('}') {
+                    ns_stack.pop();
+                }
+
+                ns_for_line.push(ns_stack.clone());
+
+                if trimmed.ends_with('{') {
+                    let name = trimmed.trim_end_matches('{').trim();
+                    if !name.is_empty() {
+                        ns_stack.push(name.to_string());
+                    }
+                }
+            }
+
+            // Collect content lines per namespace path
+            #[derive(Default)]
+            struct Node {
+                entries: Vec<String>,
+                children: std::collections::BTreeMap<String, Node>,
+            }
+
+            let mut root = Node::default();
+
+            for (start_line, end_line) in line_ranges {
+                let start = (*start_line).min(lines.len());
+                let end = (*end_line + 1).min(lines.len());
+
+                for line_idx in start..end {
+                    let line = lines[line_idx];
+                    let trimmed = line.trim();
+
+                    // Skip structural lines and annotation markers
+                    if trimmed.is_empty()
+                        || trimmed.starts_with('}')
+                        || trimmed.ends_with('{')
+                        || (trimmed.starts_with('#') && trimmed.contains('@'))
+                    {
+                        continue;
+                    }
+
+                    let content = line.trim_start().to_string();
+                    let ns_path = &ns_for_line[line_idx];
+
+                    // Insert into tree
+                    let mut node = &mut root;
+                    for part in ns_path {
+                        node = node.children.entry(part.clone()).or_default();
+                    }
+                    node.entries.push(content);
+                }
+            }
+
+            // Render tree starting from root
+            fn render_child(child: &Node, name: &str, depth: usize, out: &mut String) {
+                let indent = "  ";
+
+                // Helper to check if a node is a collapsible chain
+                fn is_collapsible_chain(node: &Node) -> bool {
+                    let assignment_count = node.entries.iter().filter(|e| e.contains('=')).count();
+                    if node.children.is_empty()
+                        && !node.entries.is_empty()
+                        && assignment_count == 1
+                        && node.entries.iter().all(|e| {
+                            let t = e.trim_start();
+                            t.starts_with('#') || t.contains('=')
+                        })
+                    {
+                        return true;
+                    }
+
+                    if node.entries.is_empty() && node.children.len() == 1 {
+                        let (_, child) = node.children.iter().next().unwrap();
+                        return is_collapsible_chain(child);
+                    }
+
+                    false
+                }
+
+                // Helper to render a collapsible chain as dotted notation
+                fn render_collapsible_dotted(
+                    node: &Node,
+                    path: &str,
+                    depth: usize,
+                    out: &mut String,
+                ) {
+                    let indent = "  ";
+                    let assignment_count = node.entries.iter().filter(|e| e.contains('=')).count();
+
+                    // Base case: leaf with single assignment
+                    if node.children.is_empty() && assignment_count == 1 {
+                        let mut pending_comments = Vec::new();
+                        for entry in &node.entries {
+                            if entry.trim_start().starts_with('#') {
+                                pending_comments.push(entry.as_str());
+                            } else if entry.contains('=') {
+                                for comment in &pending_comments {
+                                    out.push_str(&indent.repeat(depth));
+                                    out.push_str(comment);
+                                    out.push('\n');
+                                }
+                                pending_comments.clear();
+
+                                if let Some(hash_pos) = entry.find('#') {
+                                    let code_part = entry[..hash_pos].trim_end();
+                                    let comment_part = entry[hash_pos..].trim();
+
+                                    if !code_part.is_empty() {
+                                        out.push_str(&indent.repeat(depth));
+                                        out.push_str(comment_part);
+                                        out.push('\n');
+                                        out.push_str(&indent.repeat(depth));
+                                        out.push_str(path);
+                                        out.push('.');
+                                        out.push_str(code_part);
+                                        out.push('\n');
+                                        return;
+                                    }
+                                }
+
+                                out.push_str(&indent.repeat(depth));
+                                out.push_str(path);
+                                out.push('.');
+                                out.push_str(entry);
+                                out.push('\n');
+                            }
+                        }
+                        return;
+                    }
+
+                    // Recursive case: single child intermediate node
+                    if node.entries.is_empty() && node.children.len() == 1 {
+                        let (child_name, child_node) = node.children.iter().next().unwrap();
+                        let new_path = format!("{}.{}", path, child_name);
+                        render_collapsible_dotted(child_node, &new_path, depth, out);
+                        return;
+                    }
+                }
+
+                // If this node is collapsible, render as dotted notation
+                if is_collapsible_chain(child) {
+                    if !out.is_empty() && !out.ends_with("\n\n") {
+                        out.push('\n');
+                    }
+                    render_collapsible_dotted(child, name, depth, out);
+                    return;
+                }
+
+                // Intermediate single-child but not collapsible: just pass through
+                if child.entries.is_empty() && child.children.len() == 1 {
+                    let (grandchild_name, grandchild) = child.children.iter().next().unwrap();
+                    let collapsed_name = format!("{}.{}", name, grandchild_name);
+                    render_child(grandchild, &collapsed_name, depth, out);
+                    return;
+                }
+
+                // Multi-entry or multi-child: render as block
+                if !out.is_empty() && !out.ends_with("\n\n") {
+                    out.push('\n');
+                }
+
+                out.push_str(&indent.repeat(depth));
+                out.push_str(name);
+                out.push_str(" {\n");
+
+                let mut first_entry = true;
+                for entry in &child.entries {
+                    if !first_entry && entry.trim_start().starts_with('#') {
+                        out.push('\n');
+                    }
+                    first_entry = false;
+
+                    out.push_str(&indent.repeat(depth + 1));
+                    out.push_str(entry);
+                    out.push('\n');
+                }
+
+                for (child_name, grandchild) in &child.children {
+                    render_child(grandchild, child_name, depth + 1, out);
+                }
+
+                out.push_str(&indent.repeat(depth));
+                out.push_str("}\n");
+            }
+            let mut result = String::new();
+
+            // Render root entries
+            for entry in &root.entries {
+                result.push_str(entry);
+                result.push('\n');
+            }
+
+            // Render root children
+            for (name, child) in &root.children {
+                render_child(child, name, 0, &mut result);
+            }
+            result
+        })
     }
 }
 
@@ -806,18 +1143,28 @@ pub enum Statement {
         lhs: Vec<Var>,
         /// Expressions being assigned.
         rhs: Vec<Rhs>,
+        /// Optional annotations for this statement (e.g., "minimal")
+        annotations: Vec<String>,
     },
 }
 
 impl Statement {
     fn add_namespace(self, ns: &Vec<String>) -> Self {
         match self {
-            Statement::AssignLeft { lhs, rhs } => {
+            Statement::AssignLeft {
+                lhs,
+                rhs,
+                annotations,
+            } => {
                 let nlhs = lhs
                     .into_iter()
                     .map(|v| v.add_namespace(&ns))
                     .collect::<Vec<_>>();
-                Statement::AssignLeft { lhs: nlhs, rhs }
+                Statement::AssignLeft {
+                    lhs: nlhs,
+                    rhs,
+                    annotations,
+                }
             }
         }
     }
@@ -1035,6 +1382,7 @@ where
                         Ok(StatementKindPass1::VariableDef(Statement::AssignLeft {
                             lhs: vars,
                             rhs,
+                            annotations: vec![],
                         }))
                     }
                 }
@@ -1218,7 +1566,11 @@ fn truncate_namespace_rhs(ns: &[String], rhs: &Rhs) -> Rhs {
 
 fn truncate_namespace_stmt(ns: &[String], stmt: &Statement) -> Statement {
     match stmt {
-        Statement::AssignLeft { lhs, rhs } => {
+        Statement::AssignLeft {
+            lhs,
+            rhs,
+            annotations,
+        } => {
             let l = lhs
                 .iter()
                 .filter(|v| match v {
@@ -1238,7 +1590,11 @@ fn truncate_namespace_stmt(ns: &[String], stmt: &Statement) -> Statement {
                 .map(|r_item| truncate_namespace_rhs(ns, r_item))
                 .collect();
 
-            Statement::AssignLeft { lhs: l, rhs: r }
+            Statement::AssignLeft {
+                lhs: l,
+                rhs: r,
+                annotations: annotations.clone(),
+            }
         }
     }
 }
@@ -1273,7 +1629,7 @@ impl UsageStats {
 
 fn stmt_in_ns(namespace: &[String], stmt: &Statement) -> bool {
     match stmt {
-        Statement::AssignLeft { lhs, rhs: _ } => lhs.iter().any(|r| match r {
+        Statement::AssignLeft { lhs, rhs: _, .. } => lhs.iter().any(|r| match r {
             Var::Predef {
                 name: _,
                 namespace: var_ns,
@@ -1327,7 +1683,7 @@ impl VariableHistory {
     pub fn populate_cache(&mut self) {
         self.ast.iter().for_each(|f| match f {
             StatementKindOwned::VariableDef(statement) => match statement {
-                Statement::AssignLeft { lhs, rhs } => {
+                Statement::AssignLeft { lhs, rhs, .. } => {
                     if rhs.len() == 1 {
                         // Broadcast single RHS to all LHS
                         let rhs_val = rhs.first().unwrap();
@@ -1371,6 +1727,7 @@ impl VariableHistory {
                 vars_in_ns.push(StatementKindOwned::VariableDef(Statement::AssignLeft {
                     lhs: vec![wvar],
                     rhs: vec![rhs.clone()],
+                    annotations: vec![],
                 }));
             }
         }
@@ -1406,7 +1763,7 @@ impl VariableHistory {
         {
             match &stmt {
                 &StatementKindOwned::VariableDef(statement) => match statement {
-                    Statement::AssignLeft { lhs, rhs } => {
+                    Statement::AssignLeft { lhs, rhs, .. } => {
                         if let Some(index) = lhs.iter().position(|l| l == var) {
                             let rhs_to_process = if rhs.len() == 1 {
                                 rhs.first()
@@ -1489,7 +1846,7 @@ impl VariableHistory {
             .iter()
             .flat_map(|stmt| match stmt {
                 StatementKindOwned::VariableDef(statement) => match statement {
-                    Statement::AssignLeft { lhs, rhs: _ } => lhs
+                    Statement::AssignLeft { lhs, rhs: _, .. } => lhs
                         .iter()
                         .map(|lh| {
                             (
@@ -1617,7 +1974,7 @@ impl Drop for VariableHistory {
 
         let usage = self.usage.borrow();
         if usage.assigned.is_empty() && usage.evaluated.is_empty() {
-            log::warn!("Configuration was parsed but never used.");
+            log::warn!("File was parsed but never used.");
             return;
         }
 
@@ -1665,7 +2022,7 @@ fn resolve_stmt(
     i: usize,
 ) -> anyhow::Result<()> {
     match stmt {
-        Statement::AssignLeft { lhs: _, rhs } => {
+        Statement::AssignLeft { lhs: _, rhs, .. } => {
             for r in rhs.iter_mut() {
                 resolve_rhs_recursive(r, var_history, i)?;
             }
@@ -1673,6 +2030,102 @@ fn resolve_stmt(
     }
 
     Ok(())
+}
+
+/// Parses annotations from source code.
+/// Annotations are marked with `# @annotation_name` and end with an empty line.
+/// Returns a map of annotation names to line ranges (0-indexed, inclusive).
+fn parse_annotations(source_text: &str) -> HashMap<String, Vec<(usize, usize)>> {
+    let mut annotations: HashMap<String, Vec<(usize, usize)>> = HashMap::new();
+    let lines: Vec<&str> = source_text.lines().collect();
+    let mut current_annotation: Option<(String, usize)> = None;
+
+    for (line_idx, line) in lines.iter().enumerate() {
+        let trimmed = line.trim();
+
+        // Check for annotation start: # @annotation_name
+        if trimmed.starts_with("#") {
+            let comment_content = trimmed.trim_start_matches('#').trim();
+            if let Some(at_pos) = comment_content.find("@") {
+                if at_pos == 0 {
+                    let annotation_name = comment_content[1..].trim().to_string();
+
+                    // Detect if this annotation is directly before a namespace block
+                    let mut first_nonempty: Option<usize> = None;
+                    for k in (line_idx + 1)..lines.len() {
+                        if !lines[k].trim().is_empty() {
+                            first_nonempty = Some(k);
+                            break;
+                        }
+                    }
+
+                    let mut handled_block = false;
+                    if let Some(first) = first_nonempty {
+                        let first_trim = lines[first].trim();
+                        if first_trim.ends_with('{') {
+                            // Compute matching closing brace
+                            let mut depth = 0isize;
+                            let mut end_line = lines.len().saturating_sub(1);
+                            for k in first..lines.len() {
+                                let t = lines[k].trim();
+                                if t.ends_with('{') {
+                                    depth += 1;
+                                }
+                                if t.starts_with('}') {
+                                    depth -= 1;
+                                    if depth == 0 {
+                                        end_line = k;
+                                        break;
+                                    }
+                                }
+                            }
+
+                            annotations
+                                .entry(annotation_name.clone())
+                                .or_insert_with(Vec::new)
+                                .push((first, end_line));
+                            handled_block = true;
+                        }
+                    }
+
+                    if handled_block {
+                        continue;
+                    }
+
+                    // If there was a previous unclosed annotation, close it
+                    if let Some((prev_annotation, start_line)) = current_annotation.take() {
+                        annotations
+                            .entry(prev_annotation)
+                            .or_insert_with(Vec::new)
+                            .push((start_line, line_idx.saturating_sub(1)));
+                    }
+                    // Start new annotation (non-block)
+                    current_annotation = Some((annotation_name, line_idx));
+                }
+            }
+        }
+        // Check for annotation end: empty line
+        else if trimmed.is_empty() {
+            if let Some((annotation_name, start_line)) = current_annotation.take() {
+                // End line is the line before the empty line
+                annotations
+                    .entry(annotation_name)
+                    .or_insert_with(Vec::new)
+                    .push((start_line + 1, line_idx - 1));
+            }
+        }
+    }
+
+    // If there's an unclosed annotation at the end, close it
+    if let Some((annotation_name, start_line)) = current_annotation {
+        let end_line = lines.len().saturating_sub(1);
+        annotations
+            .entry(annotation_name)
+            .or_insert_with(Vec::new)
+            .push((start_line + 1, end_line));
+    }
+
+    annotations
 }
 
 /// Compiles ratslang source code from a string.
@@ -1702,13 +2155,19 @@ fn resolve_stmt(
 /// ```
 pub fn compile_code(source_code_raw: &str) -> anyhow::Result<Evaluated> {
     let currdir = std::env::current_dir()?;
-    compile_code_with_state(
+    let original_source = source_code_raw.to_string();
+    let mut result = compile_code_with_state(
         &(source_code_raw.to_owned() + "\n"), // hack to fix one-line token problems
         &currdir,
         None,
         std::io::stderr(),
         true,
-    )
+    )?;
+
+    // Update source and annotations without moving vars
+    result.source_text = original_source.clone();
+    result.annotations = parse_annotations(&original_source);
+    Ok(result)
 }
 
 /// Compiles ratslang source code with existing variable state.
@@ -1774,9 +2233,20 @@ pub fn compile_code_with_state(
                 }
             }
 
-            let vars = VariableHistory::new(ast.clone()).with_state(var_state.unwrap_or_default());
+            // Create the final VariableHistory that shares usage stats with var_history
+            // so that when it's dropped, it will warn about unused variables
+            let mut vars =
+                VariableHistory::new(ast.clone()).with_state(var_state.unwrap_or_default());
+            vars.usage = var_history.usage.clone();
 
-            return Ok(Evaluated { vars });
+            // Parse annotations from source code
+            let annotations = parse_annotations(source_code_raw);
+
+            return Ok(Evaluated {
+                vars,
+                source_text: source_code_raw.to_string(),
+                annotations,
+            });
         }
         Err(errs) => {
             let src = Source::from(source_code_raw);
@@ -2426,3 +2896,6 @@ macro_rules! resolve_path {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod annotation_tests;

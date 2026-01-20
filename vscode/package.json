@@ -2,7 +2,7 @@
   "name": "ratslang",
   "displayName": "Ratslang",
   "description": "Syntax Highlighting for the Ratslang configuration language",
-  "version": "0.2.0",
+  "version": "0.3.1",
   "engines": {
     "vscode": "^1.105.0"
   },

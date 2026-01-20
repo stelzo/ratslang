@@ -20,4 +20,6 @@ jobs:
       run: cargo build
     - name: Run tests
       run: cargo test
+    - name: Verify msrv
+      run: cargo install cargo-msrv && cargo msrv verify
 

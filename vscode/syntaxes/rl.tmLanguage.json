@@ -48,11 +48,11 @@
       "patterns": [
         {
           "name": "constant.numeric.quantity.time",
-          "match": "\\b[+-]?(\\d+\\.\\d+|\\d+)(hours?|mins?|s|ms|um|nm)\\b"
+          "match": "\\b[+-]?(\\d+\\.\\d+|\\d+)(ys|zs|as|fs|ps|ns|us|µs|ms|cs|ds|s|das|hs|ks|Ms|Gs|Ts|Ps|Es|Zs|Ys|min|mins|minute|minutes|h|hour|hours|d|day|days|a|year|years|shake|shakes|second_sidereal|seconds_sidereal|day_sidereal|days_sidereal|hour_sidereal|hours_sidereal|year_sidereal|years_sidereal|year_tropical|years_tropical)\\b"
         },
         {
           "name": "constant.numeric.quantity.length",
-          "match": "\\b[+-]?(\\d+\\.\\d+|\\d+)(mm|cm|m|us|ns)\\b"
+          "match": "\\b[+-]?(\\d+\\.\\d+|\\d+)(ym|zm|am|fm|pm|nm|um|µm|mm|cm|dm|m|dam|hm|km|Mm|Gm|Tm|Pm|Em|Zm|Ym|ft|foot|feet|in|inch|inches|mi|mile|miles|yd|yard|yards|ch|chain|chains|rd|rod|rods|angstrom|ångström|ångstroms|angstroms|fathom|fathoms|au|ua|astronomical_unit|astronomical_units|light_year|light_years|l\\.y\\.|pc|parsec|parsecs|M|nmi|nautical_mile|nautical_miles|micron|microns|µ|mil|mils|a₀|bohr_radius|bohr_radiuses|fermi|fermis|Å|μm|microinch|microinches)\\b"
         }
       ]
     },
