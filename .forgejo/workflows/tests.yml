@@ -15,18 +15,20 @@ jobs:
     runs-on: codeberg-small
 
     steps:
+    - uses: actions/checkout@v4
     - name: Dependencies
       run: |
         curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+        echo "source $HOME/.cargo/env" >> .bashrc
         source $HOME/.cargo/env
         rustup default stable
+        cargo install cargo-msrv
         apt-get update
         apt-get install -y build-essential
-    - uses: actions/checkout@v4
     - name: Build
       run: cargo build
     - name: Run tests
       run: cargo test
     - name: Verify msrv
-      run: cargo install cargo-msrv && cargo msrv verify
+      run: cargo msrv verify
 
