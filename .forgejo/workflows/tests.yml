@@ -12,10 +12,13 @@ env:
 jobs:
   build:
 
-    runs-on: ubuntu-latest
+    runs-on: codeberg-small
 
     steps:
     - uses: actions/checkout@v4
+    - uses: wackbyte/rust-toolchain@trunk
+      with:
+        toolchain: stable
     - name: Build
       run: cargo build
     - name: Run tests
