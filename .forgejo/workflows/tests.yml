@@ -2,36 +2,26 @@ name: Tests
 
 on:
   push:
-    branches: [ "main" ]
+    branches: ["main"]
   pull_request:
-    branches: [ "main" ]
+    branches: ["main"]
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
   build:
-
-    runs-on: codeberg-small
+    runs-on: ubuntu-dev
 
     steps:
-    - uses: actions/checkout@v4
-    - name: Dependencies
-      run: |
-        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-        echo "source $HOME/.cargo/env" >> .bashrc
-        source $HOME/.cargo/env
-        rustup default stable
-        apt-get update
-        apt-get install -y build-essential
-    - name: Install cargo-msrv
-      run: |
-        curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
-        cargo binstall cargo-msrv --no-confirm
-    - name: Build
-      run: cargo build
-    - name: Run tests
-      run: cargo test
-    - name: Verify msrv
-      run: cargo msrv verify
-
+      - uses: actions/checkout@v4
+      - name: Dependencies
+        run: |
+          apt-get update
+          apt-get install -y build-essential
+      - name: Build
+        run: cargo build
+      - name: Run tests
+        run: cargo test
+      - name: Verify msrv
+        run: cargo msrv verify
