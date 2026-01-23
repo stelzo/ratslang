@@ -11,7 +11,7 @@ env:
 
 jobs:
   build:
-    runs-on: ubuntu-dev
+    runs-on: ubuntu-dev-noble
 
     steps:
       - uses: actions/checkout@v4
