@@ -68,7 +68,7 @@
 //!
 //! ## Syntax Highlighting
 //!
-//! Syntax highlighting is available with [this tree-sitter grammar](https://github.com/stelzo/tree-sitter-ratslang) or [this VS Code extension](https://marketplace.visualstudio.com/items?itemName=stelzo.ratslang).
+//! Syntax highlighting is available with [this tree-sitter grammar](https://codeberg.org/stelzo/tree-sitter-ratslang) or [this VS Code extension](https://marketplace.visualstudio.com/items?itemName=stelzo.ratslang).
 //!
 //! ## Annotations
 //!

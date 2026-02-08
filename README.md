@@ -1,7 +1,7 @@
 <p align="center">
   <h3 align="center">Ratslang</h3>
   <p align="center">A compact configuration language for physical systems.</p>
-  <p align="center"><a href="https://crates.io/crates/ratslang"><img src="https://img.shields.io/crates/v/ratslang.svg" alt=""></a> <a href="https://github.com/stelzo/ratslang/tree/main/tests"><img src="https://github.com/stelzo/ratslang/actions/workflows/tests.yml/badge.svg" alt=""></a>
+  <p align="center"><a href="https://crates.io/crates/ratslang"><img src="https://img.shields.io/crates/v/ratslang.svg" alt=""></a>
   </p>
 </p>
 
@@ -177,7 +177,7 @@ Add this to your `Cargo.toml`.
 
 ~~~toml
 [dependencies]
-ratslang = "0.4.0"
+ratslang = "0.4.1"
 ~~~
 
 First, you compile a Ratslang file to get a cleaned Abstract Syntax Tree (AST) with all variables resolved.
@@ -304,7 +304,7 @@ let k_neighbors: usize = resolve_var!(configs, k_neighborhood, as usize,
 ---
 
 * Ratslang files typically use the `.rl` extension.
-* Syntax highlighting is available with [this tree-sitter grammar](https://github.com/stelzo/tree-sitter-ratslang) or this [VS Code extension](https://marketplace.visualstudio.com/items?itemName=stelzo.ratslang). For Markdown files, you can use the `awk` language for syntax highlighting. It is not perfect but works reasonably well.
+* Syntax highlighting is available with [this tree-sitter grammar](https://codeberg.org/stelzo/tree-sitter-ratslang) or this [VS Code extension](https://marketplace.visualstudio.com/items?itemName=stelzo.ratslang). For Markdown files, you can use the `awk` language for syntax highlighting. It is not perfect but works reasonably well.
 * Compile errors are beautifully rendered thanks to [Ariadne](https://crates.io/crates/ariadne) ❤️.
 
 *Ratslang: More a slang, less a lang.*
